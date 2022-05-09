@@ -217,18 +217,22 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	viper.AutomaticEnv() // read in environment variables that match
 	viper.SetDefault("grant_type", "password")
 	viper.SetDefault("poll_interval", "10s")
+	viper.SetDefault("persistence_enabled", false)
+	viper.SetDefault("persistence_path", ".")
 	viper.SetDefault("api_version", "54.0")
 	config := &RunConfig{
-		Domain:       viper.GetString("domain"),
-		ClientId:     viper.GetString("client_id"),
-		ClientSecret: viper.GetString("client_secret"),
-		Username:     viper.GetString("username"),
-		Password:     viper.GetString("password"),
-		GrantType:    viper.GetString("grant_type"),
-		ApiVersion:   viper.GetString("api_version"),
-		Queries:      queries,
-		Ticker:       time.NewTicker(viper.GetDuration("poll_interval")),
-		Limit:        viper.GetInt("limit"),
+		Domain:             viper.GetString("domain"),
+		ClientId:           viper.GetString("client_id"),
+		ClientSecret:       viper.GetString("client_secret"),
+		Username:           viper.GetString("username"),
+		Password:           viper.GetString("password"),
+		GrantType:          viper.GetString("grant_type"),
+		ApiVersion:         viper.GetString("api_version"),
+		Queries:            queries,
+		Ticker:             time.NewTicker(viper.GetDuration("poll_interval")),
+		PersistenceEnabled: viper.GetBool("persistence_enabled"),
+		PersistencePath:    viper.GetString("persistence_path"),
+		Limit:              viper.GetInt("limit"),
 	}
 
 	theValidator := validator.New()
@@ -281,31 +285,34 @@ func (p *LightningPoller) closeBadgerDb() {
 
 // getPollQuery is used to modify the query if persistence is enabled so that the query
 func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (string, error) {
-	query := queryWithCallback.Query()
+	var builder strings.Builder
+	builder.WriteString(queryWithCallback.Query())
 	// if persistence is disabled just return the query as is
 	if !p.config.PersistenceEnabled {
-		return query, nil
+		return builder.String(), nil
 	} else {
 		// query for last updated and update query based on stored timestamp
 		persistenceKey := queryWithCallback.PersistenceKey
 		LastModified, err := p.getLastModified([]byte(persistenceKey))
-		if err != nil {
+		if err != nil && !strings.Contains("Key not found", err.Error()) {
 			return "", err
 		}
+		// if we have a persisted last modified then use it in a where or and clause
 		if LastModified != "" {
 			operator := "where"
 			// if there's a where clause, switch the operator to and so we append a condition instead of creating one
-			if strings.Contains(strings.ToLower(query), operator) {
+			if strings.Contains(strings.ToLower(builder.String()), operator) {
 				operator = "and"
 			}
-			preparedQuery := fmt.Sprintf("%s %s %s > %s order by %s", query, operator, orderByField, LastModified, orderByField)
-			if p.config.Limit > 0 {
-				preparedQuery = fmt.Sprintf("%s limit %d", preparedQuery, p.config.Limit)
-			}
-			return preparedQuery, nil
-		} else {
-			return query, nil
+			builder.WriteString(fmt.Sprintf(" %s %s > %s", operator, orderByField, LastModified))
 		}
+		// add order by
+		builder.WriteString(fmt.Sprintf(" order by %s ", orderByField))
+		// if limit is configured, add limit
+		if p.config.Limit > 0 {
+			builder.WriteString(fmt.Sprintf(" limit %d ", p.config.Limit))
+		}
+		return builder.String(), nil
 	}
 }
 
