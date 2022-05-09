@@ -49,6 +49,7 @@ type RunConfig struct {
 	AccessToken        string `json:"access_token"`
 	PersistenceEnabled bool   `json:"persistence_enabled"`
 	PersistencePath    string `json:"persistence_path"`
+	Limit              int    `json:"limit"`
 }
 
 type QueryWithCallback struct {
@@ -227,6 +228,7 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		ApiVersion:   viper.GetString("api_version"),
 		Queries:      queries,
 		Ticker:       time.NewTicker(viper.GetDuration("poll_interval")),
+		Limit:        viper.GetInt("limit"),
 	}
 
 	theValidator := validator.New()
@@ -296,7 +298,11 @@ func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (str
 			if strings.Contains(strings.ToLower(query), operator) {
 				operator = "and"
 			}
-			return fmt.Sprintf("%s %s %s > %s order by %s", query, operator, orderByField, LastModified, orderByField), nil
+			preparedQuery := fmt.Sprintf("%s %s %s > %s order by %s", query, operator, orderByField, LastModified, orderByField)
+			if p.config.Limit > 0 {
+				preparedQuery = fmt.Sprintf("%s limit %d", preparedQuery, p.config.Limit)
+			}
+			return preparedQuery, nil
 		} else {
 			return query, nil
 		}
