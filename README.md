@@ -1,7 +1,7 @@
 # Salesforce Lightning Poller
 We created the lightning poller because we didn't like the cometd approach. Configuration is handled via environment variables and a simple struct.
 ## Usage Example
-To use the poller, define an array of QueryWithCallback structs. These structs have a query string to execute, and a callback function that gets called after the execution with the result, and an error.
+To use the poller, define an array of QueryWithCallback structs. These structs have a query function to execute, and a callback function that gets called after the execution with the result, and an error. For simple use cases the query function can return a string. For more complex use cases you may want to store state on disk, in memory, in a database, or do somethign else before running the query or generating the query.
 
 Create a new poller using the queries array, and then call `Run()` on the poller. Each query and callback will be executed on an interval. Authentication is done using the username and password to get an access token, the token is then used to run the queries. If the token expires, a new token is retrieved, so this can run for a long time without worrying about authentication problems. Spaces in the query are replaced with `+` before it's sent, this is done to make it easier to read and use. You can use `+` in your query if you'd like.
 ```go
@@ -16,7 +16,9 @@ import (
 func main() {
     queries := []pkg.QueryWithCallback{
         {
-            Query: "select fields(all) from Account limit 1",
+            Query: func() string {
+				return "select fields(all) from Account limit 1"
+			},
             Callback: func(result []byte, err error) {
                 if err != nil {
                   logging.Log.WithError(err).Error("error executing query")

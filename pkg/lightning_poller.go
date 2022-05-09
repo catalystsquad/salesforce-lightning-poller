@@ -44,7 +44,7 @@ type RunConfig struct {
 }
 
 type QueryWithCallback struct {
-	Query    string                         `json:"query" validate:"required"`
+	Query    func() string                  `json:"query" validate:"required"`
 	Callback func(result []byte, err error) `validate:"required"`
 }
 
@@ -67,7 +67,8 @@ func (p *LightningPoller) poll() {
 		defer func() { p.polling = false }()
 		logging.Log.Debug("polling")
 		for _, queryWithCallback := range p.config.Queries {
-			result, err := p.queryWithAuth(queryWithCallback.Query)
+			query := queryWithCallback.Query()
+			result, err := p.queryWithAuth(query)
 			queryWithCallback.Callback(result, err)
 		}
 		logging.Log.Debug("polling complete")
