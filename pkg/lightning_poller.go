@@ -8,6 +8,7 @@ import (
 	"github.com/dgraph-io/badger/v3"
 	"github.com/go-playground/validator/v10"
 	"github.com/joomcode/errorx"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
@@ -86,13 +87,17 @@ func (p *LightningPoller) poll() {
 		for _, queryWithCallback := range p.config.Queries {
 			query, _ := p.getPollQuery(queryWithCallback)
 			result, err := p.queryWithAuth(query)
-			// if there is no error, update last modified
-			if err == nil {
-				newLastModified := getLastModifiedDateFromResult(result)
-				if newLastModified != "" {
-					err = p.setLastModified(queryWithCallback.PersistenceKey, newLastModified)
-					if err != nil {
-						errorutils.LogOnErr(logging.Log.WithField("query", query), "error updating last modified date", err)
+			if err != nil {
+				errorutils.LogOnErr(nil, "error making soql query", err)
+			} else {
+				// if there is no error, update last modified
+				if err == nil {
+					newLastModified := getLastModifiedDateFromResult(result)
+					if newLastModified != "" {
+						err = p.setLastModified(queryWithCallback.PersistenceKey, newLastModified)
+						if err != nil {
+							errorutils.LogOnErr(logging.Log.WithField("query", query), "error updating last modified date", err)
+						}
 					}
 				}
 			}
@@ -153,9 +158,11 @@ func (p *LightningPoller) queryWithAuth(query string) ([]byte, error) {
 }
 
 func (p *LightningPoller) query(query string) ([]byte, int, error) {
+	logging.Log.WithFields(logrus.Fields{"query": query}).Info("sending soql query")
 	req := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(req)
-	req.SetRequestURI(p.getQueryUrl(query))
+	uri := p.getQueryUrl(query)
+	req.SetRequestURI(uri)
 	p.addAuthHeader(req)
 	res := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(res)
@@ -283,7 +290,7 @@ func (p *LightningPoller) closeBadgerDb() {
 	errorutils.LogOnErr(nil, "error closing badger database", err)
 }
 
-// getPollQuery is used to modify the query if persistence is enabled so that the query
+// getPollQuery is used to modify the base query according to configuration.
 func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (string, error) {
 	var builder strings.Builder
 	builder.WriteString(queryWithCallback.Query())
@@ -293,18 +300,18 @@ func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (str
 	} else {
 		// query for last updated and update query based on stored timestamp
 		persistenceKey := queryWithCallback.PersistenceKey
-		LastModified, err := p.getLastModified([]byte(persistenceKey))
+		lastModified, err := p.getLastModified([]byte(persistenceKey))
 		if err != nil && !strings.Contains("Key not found", err.Error()) {
 			return "", err
 		}
 		// if we have a persisted last modified then use it in a where or and clause
-		if LastModified != "" {
+		if lastModified != "" {
 			operator := "where"
 			// if there's a where clause, switch the operator to and so we append a condition instead of creating one
 			if strings.Contains(strings.ToLower(builder.String()), operator) {
 				operator = "and"
 			}
-			builder.WriteString(fmt.Sprintf(" %s %s > %s", operator, orderByField, LastModified))
+			builder.WriteString(fmt.Sprintf(" %s %s > %s", operator, orderByField, lastModified))
 		}
 		// add order by
 		builder.WriteString(fmt.Sprintf(" order by %s ", orderByField))
@@ -316,14 +323,24 @@ func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (str
 	}
 }
 
-func (p *LightningPoller) getLastModified(key []byte) (LastModified string, err error) {
+func (p *LightningPoller) getLastModified(key []byte) (lastModified string, err error) {
 	err = p.db.View(func(txn *badger.Txn) error {
 		item, getErr := txn.Get(key)
 		if getErr != nil {
 			return getErr
 		}
 		item.Value(func(val []byte) error {
-			LastModified = string(val)
+			lastModified = string(val)
+			if lastModified != "" {
+				timestamp, err := time.Parse("2006-01-02T15:04:05.000+0000", lastModified)
+				if err != nil {
+					return err
+				}
+				// use of rfc3339 is important here. SOQL uses + to indicate a space, so it parses out timestamp with + in them as a space, which is an invalid timestamp
+				// and then it gets mad that the datetime isn't valid because it made it invalid by replacing the + (for the timezone) with a space.
+				lastModified = timestamp.UTC().Format(time.RFC3339)
+				logging.Log.WithFields(logrus.Fields{"lastModified": lastModified}).Info("getLastModified")
+			}
 			return nil
 		})
 		return nil
