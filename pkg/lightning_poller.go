@@ -95,7 +95,7 @@ func (p *LightningPoller) poll() {
 				errorutils.LogOnErr(nil, "error building query", err)
 				continue
 			}
-			logging.Log.WithFields(logrus.Fields{"query": query}).Info("query")
+			logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
 			result, err := p.queryWithAuth(query)
 			if err != nil {
 				errorutils.LogOnErr(nil, "error making soql query", err)
