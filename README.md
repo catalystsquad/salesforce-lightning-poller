@@ -2,6 +2,8 @@
 We created the lightning poller because we didn't like the cometd approach. Configuration is handled via environment variables and a simple struct.
 ## Persistence
 If `LP_PERSISTENCE_ENABLED` is set to true, then the poller will persist state on disk, as well as append a where clause and an order by clause. An example query when persistence is enabled would be `select fields(all) from MyObject__c where LastModifiedDate >= 2021-03-10T13:56:52Z order by LastModifiedDate, Id limit 10 offset 1`. The poller tracks the most recent modified date that it's encountered, as well as the number of times it was previously encountered, to set the LastModifiedDate where clause, and the offset. We recommend using this mode because it lets the poller do the heavy lifting for you so that your queries can be simple, such as `select fields(all) from MyObject__c` without having to handle the other clauses, limits, offsets, etc. If you don't use persistence then you must handle that on your own between the query() and callback() functions.
+### PersistenceKey
+If `LP_PERSISTENCE_ENABLED` is true, then you must also configure the `PersistenceKey` for each `QueryWithCallback` object. It must be unique among your list of `QueryWithCallback`. The poller uses this as the key to persist data for a given query.
 ## Usage Example
 To use the poller, define an array of QueryWithCallback structs. These structs have a query function to execute, and a callback function that gets called after the execution with the result, and an error. For simple use cases the query function can return a string. For more complex use cases you may want to store state on disk, in memory, in a database, or do somethign else before running the query or generating the query.
 
