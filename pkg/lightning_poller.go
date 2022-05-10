@@ -19,7 +19,12 @@ import (
 	"time"
 )
 
-const orderByField = "LastModifiedDate"
+var zeroTime = time.Time{}
+
+type Position struct {
+	Skip             int
+	LastModifiedDate *time.Time
+}
 
 // salesforceCredentials represents the response from salesforce's /services/oauth2/token endpoint to get an access token
 type salesforceCredentials struct {
@@ -50,7 +55,7 @@ type RunConfig struct {
 	AccessToken        string `json:"access_token"`
 	PersistenceEnabled bool   `json:"persistence_enabled"`
 	PersistencePath    string `json:"persistence_path"`
-	Limit              int    `json:"limit"`
+	Limit              int    `json:"limit" validate:"gte=1,lte=1000"` // limit must be between 1-1000
 }
 
 type QueryWithCallback struct {
@@ -85,18 +90,28 @@ func (p *LightningPoller) poll() {
 		defer func() { p.polling = false }()
 		logging.Log.Debug("polling")
 		for _, queryWithCallback := range p.config.Queries {
-			query, _ := p.getPollQuery(queryWithCallback)
+			query, err := p.getPollQuery(queryWithCallback)
+			if err != nil {
+				errorutils.LogOnErr(nil, "error building query", err)
+				continue
+			}
+			logging.Log.WithFields(logrus.Fields{"query": query}).Info("query")
 			result, err := p.queryWithAuth(query)
 			if err != nil {
 				errorutils.LogOnErr(nil, "error making soql query", err)
 			} else {
 				// if there is no error, update last modified
 				if err == nil {
-					newLastModified := getLastModifiedDateFromResult(result)
-					if newLastModified != "" {
-						err = p.setLastModified(queryWithCallback.PersistenceKey, newLastModified)
+					newPosition, newPositionErr := getNewPositionFromResult(result)
+					if newPositionErr != nil {
+						errorutils.LogOnErr(logging.Log.WithField("query", query), "error parsing LastModifiedDate from result", err)
+						continue
+					}
+					if newPosition.LastModifiedDate != nil {
+						err = p.setPosition(queryWithCallback.PersistenceKey, newPosition)
 						if err != nil {
 							errorutils.LogOnErr(logging.Log.WithField("query", query), "error updating last modified date", err)
+							continue
 						}
 					}
 				}
@@ -109,14 +124,31 @@ func (p *LightningPoller) poll() {
 	}
 }
 
-func getLastModifiedDateFromResult(result []byte) string {
-	lastModified := ""
+func getNewPositionFromResult(result []byte) (position Position, err error) {
 	numRecords := gjson.GetBytes(result, "records.#").Int()
+	finalArrayIndex := numRecords - 1
 	if numRecords > 0 {
-		path := fmt.Sprintf("records.%d.%s", numRecords-1, orderByField)
-		lastModified = gjson.GetBytes(result, path).String()
+		path := fmt.Sprintf("records.%d.LastModifiedDate", finalArrayIndex)
+		finalLastModifiedDateResult := gjson.GetBytes(result, path)
+		finalLastModifiedDateString := finalLastModifiedDateResult.String()
+		// loop backwards until we hit a different date, incrementing the skip each time.
+		for i := finalArrayIndex; i >= 0; i-- {
+			// break if the date is different
+			path := fmt.Sprintf("records.%d.LastModifiedDate", i)
+			if gjson.GetBytes(result, path).String() != finalLastModifiedDateString {
+				break
+			}
+			// date is the same, increment skip
+			position.Skip++
+		}
+		timestamp, timestampErr := getTimestampFromResultLastModifiedDate(finalLastModifiedDateString)
+		if timestampErr != nil {
+			err = timestampErr
+			return
+		}
+		position.LastModifiedDate = &timestamp
 	}
-	return lastModified
+	return
 }
 
 func (p *LightningPoller) queryWithAuth(query string) ([]byte, error) {
@@ -158,7 +190,7 @@ func (p *LightningPoller) queryWithAuth(query string) ([]byte, error) {
 }
 
 func (p *LightningPoller) query(query string) ([]byte, int, error) {
-	logging.Log.WithFields(logrus.Fields{"query": query}).Info("sending soql query")
+	logging.Log.WithFields(logrus.Fields{"query": query}).Debug("sending soql query")
 	req := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(req)
 	uri := p.getQueryUrl(query)
@@ -241,7 +273,6 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		PersistencePath:    viper.GetString("persistence_path"),
 		Limit:              viper.GetInt("limit"),
 	}
-
 	theValidator := validator.New()
 	err := theValidator.Struct(config)
 	if err != nil {
@@ -300,57 +331,61 @@ func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (str
 	} else {
 		// query for last updated and update query based on stored timestamp
 		persistenceKey := queryWithCallback.PersistenceKey
-		lastModified, err := p.getLastModified([]byte(persistenceKey))
+		position, err := p.getPosition([]byte(persistenceKey))
 		if err != nil && !strings.Contains("Key not found", err.Error()) {
 			return "", err
 		}
-		// if we have a persisted last modified then use it in a where or and clause
-		if lastModified != "" {
-			operator := "where"
-			// if there's a where clause, switch the operator to and so we append a condition instead of creating one
-			if strings.Contains(strings.ToLower(builder.String()), operator) {
-				operator = "and"
-			}
-			builder.WriteString(fmt.Sprintf(" %s %s > %s", operator, orderByField, lastModified))
+		operator := "where"
+		// if there's a where clause, switch the operator to and so we append a condition instead of creating one
+		if strings.Contains(strings.ToLower(builder.String()), operator) {
+			operator = "and"
 		}
-		// add order by
-		builder.WriteString(fmt.Sprintf(" order by %s ", orderByField))
-		// if limit is configured, add limit
-		if p.config.Limit > 0 {
-			builder.WriteString(fmt.Sprintf(" limit %d ", p.config.Limit))
+		// use of rfc3339 is important here. SOQL uses + to indicate a space, so it parses out timestamp with + in them as a space, which is an invalid timestamp
+		// and then it gets mad that the datetime isn't valid because it made it invalid by replacing the + (for the timezone) with a space.
+		// if the time is not zero, use time - 2 seconds to make sure we never catch mid second updates
+		if position.LastModifiedDate.UTC() != zeroTime.UTC() {
+			correctedTime := position.LastModifiedDate.Add(-2 * time.Second)
+			position.LastModifiedDate = &correctedTime
 		}
+		dateTimeString := getRfcFormattedUtcTimestampString(*position.LastModifiedDate)
+		builder.WriteString(fmt.Sprintf(" %s LastModifiedDate >= %s order by LastModifiedDate, Id limit %d offset %d", operator, dateTimeString, p.config.Limit, position.Skip))
 		return builder.String(), nil
 	}
 }
 
-func (p *LightningPoller) getLastModified(key []byte) (lastModified string, err error) {
+// getPosition fetches the persisted position. If there is none, then it initializes to zero values
+func (p *LightningPoller) getPosition(key []byte) (position Position, err error) {
 	err = p.db.View(func(txn *badger.Txn) error {
 		item, getErr := txn.Get(key)
 		if getErr != nil {
 			return getErr
 		}
-		item.Value(func(val []byte) error {
-			lastModified = string(val)
-			if lastModified != "" {
-				timestamp, err := time.Parse("2006-01-02T15:04:05.000+0000", lastModified)
-				if err != nil {
-					return err
-				}
-				// use of rfc3339 is important here. SOQL uses + to indicate a space, so it parses out timestamp with + in them as a space, which is an invalid timestamp
-				// and then it gets mad that the datetime isn't valid because it made it invalid by replacing the + (for the timezone) with a space.
-				lastModified = timestamp.UTC().Format(time.RFC3339)
-				logging.Log.WithFields(logrus.Fields{"lastModified": lastModified}).Info("getLastModified")
-			}
-			return nil
+		return item.Value(func(val []byte) error {
+			return json.Unmarshal(val, &position)
 		})
-		return nil
 	})
+	// if there is no stored date, use a zero date
+	if position.LastModifiedDate == nil {
+		position.LastModifiedDate = &time.Time{}
+	}
 	return
 }
 
-func (p *LightningPoller) setLastModified(key string, value string) error {
-	err := p.db.Update(func(txn *badger.Txn) error {
-		return txn.Set([]byte(key), []byte(value))
+func getRfcFormattedUtcTimestampString(timestamp time.Time) string {
+	return timestamp.UTC().Format(time.RFC3339)
+}
+
+func (p *LightningPoller) setPosition(key string, position Position) error {
+	positionBytes, err := json.Marshal(position)
+	if err != nil {
+		return err
+	}
+	err = p.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(key), positionBytes)
 	})
 	return err
+}
+
+func getTimestampFromResultLastModifiedDate(lastModifiedDate string) (timestamp time.Time, err error) {
+	return time.Parse("2006-01-02T15:04:05.000+0000", lastModifiedDate)
 }
