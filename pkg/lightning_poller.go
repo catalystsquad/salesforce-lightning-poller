@@ -22,7 +22,7 @@ import (
 var zeroTime = time.Time{}
 
 type Position struct {
-	Skip             int
+	Offset           int
 	LastModifiedDate *time.Time
 }
 
@@ -131,15 +131,15 @@ func getNewPositionFromResult(result []byte) (position Position, err error) {
 		path := fmt.Sprintf("records.%d.LastModifiedDate", finalArrayIndex)
 		finalLastModifiedDateResult := gjson.GetBytes(result, path)
 		finalLastModifiedDateString := finalLastModifiedDateResult.String()
-		// loop backwards until we hit a different date, incrementing the skip each time.
+		// loop backwards until we hit a different date, incrementing the offset each time.
 		for i := finalArrayIndex; i >= 0; i-- {
 			// break if the date is different
 			path := fmt.Sprintf("records.%d.LastModifiedDate", i)
 			if gjson.GetBytes(result, path).String() != finalLastModifiedDateString {
 				break
 			}
-			// date is the same, increment skip
-			position.Skip++
+			// date is the same, increment offset
+			position.Offset++
 		}
 		timestamp, timestampErr := getTimestampFromResultLastModifiedDate(finalLastModifiedDateString)
 		if timestampErr != nil {
@@ -348,7 +348,7 @@ func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (str
 			position.LastModifiedDate = &correctedTime
 		}
 		dateTimeString := getRfcFormattedUtcTimestampString(*position.LastModifiedDate)
-		builder.WriteString(fmt.Sprintf(" %s LastModifiedDate >= %s order by LastModifiedDate, Id limit %d offset %d", operator, dateTimeString, p.config.Limit, position.Skip))
+		builder.WriteString(fmt.Sprintf(" %s LastModifiedDate >= %s order by LastModifiedDate, Id limit %d offset %d", operator, dateTimeString, p.config.Limit, position.Offset))
 		return builder.String(), nil
 	}
 }
