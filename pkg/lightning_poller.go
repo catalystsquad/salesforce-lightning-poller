@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/catalystsquad/app-utils-go/errorutils"
 	"github.com/catalystsquad/app-utils-go/logging"
+	"github.com/catalystsquad/salesforce-utils/pkg"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/go-playground/validator/v10"
 	"github.com/joomcode/errorx"
@@ -12,8 +13,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
-	"github.com/valyala/fasthttp"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -40,19 +39,12 @@ type LightningPoller struct {
 	config  *RunConfig
 	polling bool
 	db      *badger.DB
+	sfUtils *pkg.SalesforceUtils
 }
 
 type RunConfig struct {
-	Domain             string              `json:"domain" validate:"required"`
-	ClientId           string              `json:"client_id" validate:"required"`
-	ClientSecret       string              `json:"client_secret" validate:"required"`
-	Username           string              `json:"username" validate:"required"`
-	Password           string              `json:"password" validate:"required"`
-	GrantType          string              `json:"grant_type" validate:"required"`
-	ApiVersion         string              `json:"api_version" validate:"required"`
 	Queries            []QueryWithCallback `validate:"required"`
 	Ticker             *time.Ticker
-	AccessToken        string `json:"access_token"`
 	PersistenceEnabled bool   `json:"persistence_enabled"`
 	PersistencePath    string `json:"persistence_path"`
 	Limit              int    `json:"limit" validate:"gte=1,lte=1000"` // limit must be between 1-1000
@@ -64,10 +56,17 @@ type QueryWithCallback struct {
 	Callback       func(result []byte, err error) `validate:"required"`
 }
 
-func NewLightningPoller(queries []QueryWithCallback) (*LightningPoller, error) {
+func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config) (*LightningPoller, error) {
 	poller := &LightningPoller{}
 	config, err := initConfig(queries)
+	if err != nil {
+		return nil, err
+	}
 	poller.config = config
+	poller.sfUtils, err = pkg.NewSalesforceUtils(true, sfConfig)
+	if err != nil {
+		return nil, err
+	}
 	return poller, err
 }
 
@@ -96,13 +95,16 @@ func (p *LightningPoller) poll() {
 				continue
 			}
 			logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
-			result, err := p.queryWithAuth(query)
+			response, err := p.sfUtils.ExecuteSoqlQuery(query)
 			if err != nil {
 				errorutils.LogOnErr(nil, "error making soql query", err)
 			} else {
-				// if there is no error, update last modified
-				if err == nil {
-					newPosition, newPositionErr := getNewPositionFromResult(result)
+				recordsJson, jsonErr := json.Marshal(response.Records)
+				if jsonErr != nil {
+					errorutils.LogOnErr(nil, "error making soql query", err)
+				} else {
+					// if there is no error, update last modified
+					newPosition, newPositionErr := getNewPositionFromResult(recordsJson)
 					if newPositionErr != nil {
 						errorutils.LogOnErr(logging.Log.WithField("query", query), "error parsing LastModifiedDate from result", err)
 						continue
@@ -114,9 +116,9 @@ func (p *LightningPoller) poll() {
 							continue
 						}
 					}
+					queryWithCallback.Callback(recordsJson, err)
 				}
 			}
-			queryWithCallback.Callback(result, err)
 		}
 		logging.Log.Debug("polling complete")
 	} else {
@@ -151,86 +153,6 @@ func getNewPositionFromResult(result []byte) (position Position, err error) {
 	return
 }
 
-func (p *LightningPoller) queryWithAuth(query string) ([]byte, error) {
-	// check for empty access token, attempt to get token if it's empty
-	if p.config.AccessToken == "" {
-		err := p.getSalesforceCredentials()
-		if err != nil {
-			return nil, err
-		}
-	}
-	// make query
-	body, statusCode, err := p.query(query)
-	// return on error
-	if err != nil {
-		return nil, errorx.Decorate(err, "error making query")
-	}
-
-	if statusCode == http.StatusOK {
-		// return the body if we got a 200
-		return body, nil
-	} else if statusCode == http.StatusUnauthorized {
-		// token is invalid or expired, authenticate and try again
-		err = p.getSalesforceCredentials()
-		body, statusCode, err = p.query(query)
-		// return on error
-		if err != nil {
-			return nil, errorx.Decorate(err, "error making query")
-		}
-		if statusCode == http.StatusOK {
-			return body, nil
-		} else {
-			// return an error
-			return nil, errorx.Decorate(err, "unexpected status code: %d with body: %s", statusCode, body)
-		}
-	} else {
-		// return an error
-		return nil, errorx.Decorate(err, "unexpected status code: %d with body: %s", statusCode, body)
-	}
-}
-
-func (p *LightningPoller) query(query string) ([]byte, int, error) {
-	logging.Log.WithFields(logrus.Fields{"query": query}).Debug("sending soql query")
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
-	uri := p.getQueryUrl(query)
-	req.SetRequestURI(uri)
-	p.addAuthHeader(req)
-	res := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(res)
-	err := fasthttp.Do(req, res)
-	return res.Body(), res.StatusCode(), err
-}
-
-func (p *LightningPoller) getSalesforceCredentials() error {
-	body, statusCode, err := p.getSalesforceAccessToken()
-	if err != nil {
-		return errorx.Decorate(err, "error getting access token")
-	}
-	if statusCode != 200 {
-		return errorx.Decorate(err, "error getting access token")
-	}
-	var creds salesforceCredentials
-	err = json.Unmarshal(body, &creds)
-	if err != nil {
-		return errorx.Decorate(err, "error getting access token")
-	}
-	p.config.AccessToken = creds.AccessToken
-	return nil
-}
-
-func (p *LightningPoller) getSalesforceAccessToken() ([]byte, int, error) {
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
-	uri := p.getAuthUrl()
-	req.SetRequestURI(uri)
-	req.Header.SetMethod("POST")
-	res := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(res)
-	err := fasthttp.Do(req, res)
-	return res.Body(), res.StatusCode(), err
-}
-
 // initConfig reads in config file and ENV variables if set.
 func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	var cfgFile string
@@ -260,13 +182,6 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	viper.SetDefault("persistence_path", ".")
 	viper.SetDefault("api_version", "54.0")
 	config := &RunConfig{
-		Domain:             viper.GetString("domain"),
-		ClientId:           viper.GetString("client_id"),
-		ClientSecret:       viper.GetString("client_secret"),
-		Username:           viper.GetString("username"),
-		Password:           viper.GetString("password"),
-		GrantType:          viper.GetString("grant_type"),
-		ApiVersion:         viper.GetString("api_version"),
 		Queries:            queries,
 		Ticker:             time.NewTicker(viper.GetDuration("poll_interval")),
 		PersistenceEnabled: viper.GetBool("persistence_enabled"),
@@ -283,27 +198,6 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		return nil, errorx.DecorateMany("error initializing config", errs...)
 	}
 	return config, nil
-}
-
-// getQueryUrl gets a formatted url to the soql query endpoint
-func (p *LightningPoller) getQueryUrl(query string) string {
-	formattedQuery := strings.Replace(query, " ", "+", -1)
-	return fmt.Sprintf("%s/services/data/v%s/query?q=%s", p.getBaseUrl(), p.config.ApiVersion, formattedQuery)
-}
-
-// getAuthUrl gets a formatted url to the token endpoint
-func (p *LightningPoller) getAuthUrl() string {
-	return fmt.Sprintf("%s/services/oauth2/token?client_id=%s&client_secret=%s&username=%s&password=%s&grant_type=%s", p.getBaseUrl(), p.config.ClientId, p.config.ClientSecret, p.config.Username, p.config.Password, p.config.GrantType)
-}
-
-// getBaseUrl gets a base url using the configured domain
-func (p *LightningPoller) getBaseUrl() string {
-	return fmt.Sprintf("https://%s", p.config.Domain)
-}
-
-// addAuthHeader adds the access token from the config to the request
-func (p *LightningPoller) addAuthHeader(req *fasthttp.Request) {
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", p.config.AccessToken))
 }
 
 func (p *LightningPoller) openBadgerDb(path string) error {
@@ -343,10 +237,10 @@ func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (str
 		// use of rfc3339 is important here. SOQL uses + to indicate a space, so it parses out timestamp with + in them as a space, which is an invalid timestamp
 		// and then it gets mad that the datetime isn't valid because it made it invalid by replacing the + (for the timezone) with a space.
 		// if the time is not zero, use time - 2 seconds to make sure we never catch mid second updates
-		if position.LastModifiedDate.UTC() != zeroTime.UTC() {
-			correctedTime := position.LastModifiedDate.Add(-2 * time.Second)
-			position.LastModifiedDate = &correctedTime
-		}
+		//if position.LastModifiedDate.UTC() != zeroTime.UTC() {
+		//	correctedTime := position.LastModifiedDate.Add(-2 * time.Second)
+		//	position.LastModifiedDate = &correctedTime
+		//}
 		dateTimeString := getRfcFormattedUtcTimestampString(*position.LastModifiedDate)
 		builder.WriteString(fmt.Sprintf(" %s LastModifiedDate >= %s order by LastModifiedDate, Id limit %d offset %d", operator, dateTimeString, p.config.Limit, position.Offset))
 		return builder.String(), nil
