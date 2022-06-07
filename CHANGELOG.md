@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/catalystsquad/repo-name/compare/v1.0.0...v1.0.1) (2022-06-07)
+
+
+### Bug Fixes
+
+* Fix position tracking edge case ([#5](https://github.com/catalystsquad/repo-name/issues/5)) ([bf4b671](https://github.com/catalystsquad/repo-name/commit/bf4b671ffc2d36ade768892eb3fba1a2263b165a))
+
 # 1.0.0 (2022-05-11)
 
 
