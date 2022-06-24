@@ -27,7 +27,7 @@ type LightningPoller struct {
 	config    *RunConfig
 	polling   bool
 	db        *badger.DB
-	sfUtils   *pkg.SalesforceUtils
+	SfUtils   *pkg.SalesforceUtils
 	positions map[string]*Position
 }
 
@@ -52,7 +52,7 @@ func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config) (*Ligh
 		return nil, err
 	}
 	poller.config = config
-	poller.sfUtils, err = pkg.NewSalesforceUtils(true, sfConfig)
+	poller.SfUtils, err = pkg.NewSalesforceUtils(true, sfConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (p *LightningPoller) poll() {
 				continue
 			}
 			logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
-			response, err := p.sfUtils.ExecuteSoqlQuery(query)
+			response, err := p.SfUtils.ExecuteSoqlQuery(query)
 			if err != nil {
 				errorutils.LogOnErr(nil, "error making soql query", err)
 			} else {
