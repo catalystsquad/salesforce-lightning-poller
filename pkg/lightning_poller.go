@@ -15,6 +15,7 @@ import (
 	"github.com/tidwall/gjson"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,9 +26,9 @@ type Position struct {
 
 type LightningPoller struct {
 	config    *RunConfig
-	polling   bool
+	pollMap   *sync.Map
 	db        *badger.DB
-	sfUtils   *pkg.SalesforceUtils
+	SfUtils   *pkg.SalesforceUtils
 	positions map[string]*Position
 }
 
@@ -46,13 +47,15 @@ type QueryWithCallback struct {
 }
 
 func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config) (*LightningPoller, error) {
-	poller := &LightningPoller{}
+	poller := &LightningPoller{
+		pollMap: &sync.Map{},
+	}
 	config, err := initConfig(queries)
 	if err != nil {
 		return nil, err
 	}
 	poller.config = config
-	poller.sfUtils, err = pkg.NewSalesforceUtils(true, sfConfig)
+	poller.SfUtils, err = pkg.NewSalesforceUtils(true, sfConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -97,40 +100,47 @@ func (p *LightningPoller) loadPositions() error {
 }
 
 func (p *LightningPoller) poll() {
-	if !p.polling {
-		p.polling = true
-		defer func() { p.polling = false }()
-		logging.Log.Debug("polling")
-		for _, queryWithCallback := range p.config.Queries {
-			query, err := p.getPollQuery(queryWithCallback)
-			if err != nil {
-				errorutils.LogOnErr(nil, "error building query", err)
-				continue
-			}
-			logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
-			response, err := p.sfUtils.ExecuteSoqlQuery(query)
-			if err != nil {
-				errorutils.LogOnErr(nil, "error making soql query", err)
+	for _, queryWithCallback := range p.config.Queries {
+		go func(queryWithCallback QueryWithCallback) {
+			defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
+			polling, ok := p.pollMap.Load(queryWithCallback.PersistenceKey)
+			if !ok {
+				// first poll, so set polling to true
+				p.pollMap.Store(queryWithCallback.PersistenceKey, true)
+			} else if polling.(bool) {
+				// polling is still true, do nothing
+				logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Debug("skipping poll")
+				return
 			} else {
-				if len(response.Records) > 0 {
-					recordsJson, jsonErr := json.Marshal(response.Records)
-					if jsonErr != nil {
-						errorutils.LogOnErr(nil, "error making soql query", err)
-					} else {
-						savePosition := queryWithCallback.Callback(recordsJson, err)
-						if savePosition {
-							positionErr := p.updatePosition(queryWithCallback.PersistenceKey, recordsJson)
-							if positionErr != nil {
-								errorutils.LogOnErr(nil, "error updating position", positionErr)
+				// no poll in progress, so run the query and callback
+				logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("polling")
+				query, err := p.getPollQuery(queryWithCallback)
+				if err != nil {
+					errorutils.LogOnErr(nil, "error building query", err)
+					return
+				}
+				logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
+				response, err := p.SfUtils.ExecuteSoqlQuery(query)
+				if err != nil {
+					errorutils.LogOnErr(nil, "error making soql query", err)
+				} else {
+					if len(response.Records) > 0 {
+						recordsJson, jsonErr := json.Marshal(response.Records)
+						if jsonErr != nil {
+							errorutils.LogOnErr(nil, "error making soql query", err)
+						} else {
+							savePosition := queryWithCallback.Callback(recordsJson, err)
+							if savePosition {
+								positionErr := p.updatePosition(queryWithCallback.PersistenceKey, recordsJson)
+								if positionErr != nil {
+									errorutils.LogOnErr(nil, "error updating position", positionErr)
+								}
 							}
 						}
 					}
 				}
 			}
-		}
-		logging.Log.Debug("polling complete")
-	} else {
-		logging.Log.Debug("not polling because poll is currently in progress")
+		}(queryWithCallback)
 	}
 }
 
