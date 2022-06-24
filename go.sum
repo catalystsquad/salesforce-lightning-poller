@@ -56,6 +56,8 @@ github.com/catalystsquad/salesforce-utils v1.0.1-0.20220606195105-e1b0897b2170 h
 github.com/catalystsquad/salesforce-utils v1.0.1-0.20220606195105-e1b0897b2170/go.mod h1:aqOHZT1mtDQiOj/dq1JBzP/VtyHtkQIOLFYgwU/Ctag=
 github.com/catalystsquad/salesforce-utils v1.0.1 h1:zwYrJneBTEAC/1GaFDZgG0bRqEV2CzXcM2kEkqwRtXI=
 github.com/catalystsquad/salesforce-utils v1.0.1/go.mod h1:aqOHZT1mtDQiOj/dq1JBzP/VtyHtkQIOLFYgwU/Ctag=
+github.com/catalystsquad/salesforce-utils v1.0.2-0.20220624162821-5f7d8a88b4c3 h1:PknP1nNyKBdIg8kGn6SbNrNSXUZqSFsEObnTJ8F3/vk=
+github.com/catalystsquad/salesforce-utils v1.0.2-0.20220624162821-5f7d8a88b4c3/go.mod h1:aqOHZT1mtDQiOj/dq1JBzP/VtyHtkQIOLFYgwU/Ctag=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/cespare/xxhash v1.1.0 h1:a6HrQnmkObjyL+Gs60czilIUGqrzKutQD6XZog3p+ko=
 github.com/cespare/xxhash v1.1.0/go.mod h1:XrSqR1VqqWfGrhpAt58auRo0WTKS1nRRg3ghfAqPWnc=
