@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/catalystsquad/repo-name/compare/v1.0.1...v1.0.2) (2022-06-24)
+
+
+### Bug Fixes
+
+* Refactor to handle queries in parallel and on independent poll statuses ([#6](https://github.com/catalystsquad/repo-name/issues/6)) ([b9aa75f](https://github.com/catalystsquad/repo-name/commit/b9aa75f27fb29b4a212d32f47d60fd00145c6435))
+
 ## [1.0.1](https://github.com/catalystsquad/repo-name/compare/v1.0.0...v1.0.1) (2022-06-07)
 
 
