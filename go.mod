@@ -6,7 +6,7 @@ require (
 	github.com/MatthewsREIS/protos-api v1.1.12
 	github.com/artonge/go-csv-tag/v2 v2.0.7
 	github.com/catalystsquad/app-utils-go v1.0.4
-	github.com/catalystsquad/salesforce-utils v1.0.2-0.20220624162821-5f7d8a88b4c3
+	github.com/catalystsquad/salesforce-utils v1.0.2-0.20220624164134-9177c4493095
 	github.com/dgraph-io/badger/v3 v3.2103.2
 	github.com/emirpasic/gods v1.18.1
 	github.com/go-playground/validator/v10 v10.11.0
