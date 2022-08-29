@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.0.2...v1.0.3) (2022-08-29)
+
+
+### Bug Fixes
+
+* date comparison ([#7](https://github.com/catalystsquad/salesforce-lightning-poller/issues/7)) ([b8ec412](https://github.com/catalystsquad/salesforce-lightning-poller/commit/b8ec41297288c4fee5f14d70b16f9ccf36b81016))
+
 ## [1.0.2](https://github.com/catalystsquad/repo-name/compare/v1.0.1...v1.0.2) (2022-06-24)
 
 
