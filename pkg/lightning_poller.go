@@ -152,7 +152,7 @@ func (p *LightningPoller) updatePosition(key string, recordsJson []byte) error {
 	position := p.positions[key]
 	// if the date is the same, add the offsets. This would happen if you got several pages with the same date. If you
 	/// don't combine the offsets then you'll just get the same page of data over and over forever.
-	if position.LastModifiedDate == newPosition.LastModifiedDate {
+	if position.LastModifiedDate.Equal(*newPosition.LastModifiedDate) {
 		position.Offset += newPosition.Offset
 	} else {
 		// date is different, replace the position entirely
