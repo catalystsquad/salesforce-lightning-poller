@@ -38,7 +38,6 @@ type RunConfig struct {
 	Ticker             *time.Ticker
 	PersistenceEnabled bool   `json:"persistence_enabled"`
 	PersistencePath    string `json:"persistence_path"`
-	Limit              int    `json:"limit" validate:"gte=1,lte=1000"` // limit must be between 1-1000
 }
 
 type QueryWithCallback struct {
@@ -185,7 +184,7 @@ func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, 
 			return err
 		}
 	}
-	logging.Log.WithFields(logrus.Fields{"lastModifiedDate": position.LastModifiedDate}).Debug("updated position")
+	logging.Log.WithFields(logrus.Fields{"lastModifiedDate": position.LastModifiedDate, "persistence_key": key}).Debug("updated position")
 	return nil
 }
 
@@ -238,7 +237,6 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		Ticker:             time.NewTicker(viper.GetDuration("poll_interval")),
 		PersistenceEnabled: viper.GetBool("persistence_enabled"),
 		PersistencePath:    viper.GetString("persistence_path"),
-		Limit:              viper.GetInt("limit"),
 	}
 	theValidator := validator.New()
 	err := theValidator.Struct(config)
@@ -307,9 +305,11 @@ func (p *LightningPoller) getPosition(key []byte) (position *Position, err error
 		})
 	})
 	if err != nil {
+		logging.Log.WithFields(logrus.Fields{"key": string(key), "position": position, "err": err}).Debug("error when retrieving last position")
 		// if the key is not found, then return a new position with zero state
 		if strings.Contains(err.Error(), "Key not found") {
 			err = nil
+			logging.Log.WithFields(logrus.Fields{"key": string(key)}).Debug("reset position to zero date")
 			position = &Position{LastModifiedDate: &time.Time{}}
 		}
 	}
