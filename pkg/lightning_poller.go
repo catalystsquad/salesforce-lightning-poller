@@ -177,6 +177,7 @@ func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, 
 	if err != nil {
 		return err
 	}
+	p.positions[key] = &position
 	// update saved position if persistence is enabled
 	if p.config.PersistenceEnabled {
 		err := p.setPosition(key, position)
