@@ -3,6 +3,11 @@ package pkg
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/catalystsquad/app-utils-go/errorutils"
 	"github.com/catalystsquad/app-utils-go/logging"
 	"github.com/catalystsquad/salesforce-utils/pkg"
@@ -13,15 +18,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
-	"os"
-	"strings"
-	"sync"
-	"time"
 )
 
 type Position struct {
-	Offset           int
 	LastModifiedDate *time.Time
+	NextURL          string
 }
 
 type LightningPoller struct {
@@ -111,87 +112,96 @@ func (p *LightningPoller) poll() {
 				// polling is still true, do nothing
 				logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Debug("skipping poll")
 				return
-			} else {
-				// no poll in progress, so run the query and callback
-				logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("polling")
-				query, err := p.getPollQuery(queryWithCallback)
+			}
+
+			// no poll in progress, so run the query and callback
+			logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("polling")
+
+			// attempt to query with the NextRecordsUrl first
+			nextRecordsURL := p.getNextRecordsURL(queryWithCallback)
+			if nextRecordsURL != "" {
+				nextURLResponse, err := p.SfUtils.GetNextRecords(nextRecordsURL)
 				if err != nil {
-					errorutils.LogOnErr(nil, "error building query", err)
-					return
-				}
-				logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
-				response, err := p.SfUtils.ExecuteSoqlQuery(query)
-				if err != nil {
-					errorutils.LogOnErr(nil, "error making soql query", err)
+					// check if the NextRecordsUrl was not valid, return and
+					// log if it was some other error
+					// TODO could check the error better than this
+					if !strings.Contains(err.Error(), "INVALID_QUERY_LOCATOR") {
+						errorutils.LogOnErr(nil, "error getting next records", err)
+						return
+					}
 				} else {
-					if len(response.Records) > 0 {
-						recordsJson, jsonErr := json.Marshal(response.Records)
-						if jsonErr != nil {
-							errorutils.LogOnErr(nil, "error making soql query", err)
-						} else {
-							savePosition := queryWithCallback.Callback(recordsJson, err)
-							if savePosition {
-								positionErr := p.updatePosition(queryWithCallback.PersistenceKey, recordsJson)
-								if positionErr != nil {
-									errorutils.LogOnErr(nil, "error updating position", positionErr)
-								}
-							}
-						}
+					if len(nextURLResponse.Records) > 0 {
+						p.handleSalesforceResponse(nextURLResponse, queryWithCallback)
+						return
 					}
 				}
+			}
+			// if we got here, then the NextRecordsUrl was empty, failed, or
+			// had an empty reponse so query salesforce with the configured
+			// query
+			query, err := p.getPollQuery(queryWithCallback)
+			if err != nil {
+				errorutils.LogOnErr(nil, "error building query", err)
+				return
+			}
+			logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
+			queryResponse, err := p.SfUtils.ExecuteSoqlQuery(query)
+			if err != nil {
+				errorutils.LogOnErr(nil, "error making soql query", err)
+				return
+			}
+
+			if len(queryResponse.Records) > 0 {
+				p.handleSalesforceResponse(queryResponse, queryWithCallback)
 			}
 		}(queryWithCallback)
 	}
 }
 
-func (p *LightningPoller) updatePosition(key string, recordsJson []byte) error {
-	newPosition, err := getNewPositionFromResult(recordsJson)
+func (p *LightningPoller) handleSalesforceResponse(response pkg.SoqlResponse, queryWithCallback QueryWithCallback) {
+	recordsJSON, err := json.Marshal(response.Records)
+	if err != nil {
+		errorutils.LogOnErr(nil, "error marshaling soql query response", err)
+		return
+	}
+	savePosition := queryWithCallback.Callback(recordsJSON, err)
+	if savePosition {
+		positionErr := p.updatePosition(queryWithCallback.PersistenceKey, response, recordsJSON)
+		if positionErr != nil {
+			errorutils.LogOnErr(nil, "error updating position", positionErr)
+		}
+	}
+}
+
+func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, recordsJSON []byte) error {
+	position, err := getPositionFromResult(response, recordsJSON)
 	if err != nil {
 		return err
 	}
-	position := p.positions[key]
-	// if the date is the same, add the offsets. This would happen if you got several pages with the same date. If you
-	/// don't combine the offsets then you'll just get the same page of data over and over forever.
-	if position.LastModifiedDate.Equal(*newPosition.LastModifiedDate) {
-		position.Offset += newPosition.Offset
-	} else {
-		// date is different, replace the position entirely
-		position.LastModifiedDate = newPosition.LastModifiedDate
-		position.Offset = newPosition.Offset
-	}
 	// update saved position if persistence is enabled
 	if p.config.PersistenceEnabled {
-		err := p.setPosition(key, *position)
+		err := p.setPosition(key, position)
 		if err != nil {
 			return err
 		}
 	}
-	logging.Log.WithFields(logrus.Fields{"lastModifiedDate": position.LastModifiedDate, "offset": position.Offset}).Debug("updated position")
+	logging.Log.WithFields(logrus.Fields{"lastModifiedDate": position.LastModifiedDate}).Debug("updated position")
 	return nil
 }
 
-func getNewPositionFromResult(recordsJson []byte) (position Position, err error) {
-	numRecords := gjson.GetBytes(recordsJson, "#").Int()
+func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte) (position Position, err error) {
+	numRecords := gjson.GetBytes(recordsJSON, "#").Int()
 	finalArrayIndex := numRecords - 1
 	path := fmt.Sprintf("%d.LastModifiedDate", finalArrayIndex)
-	finalLastModifiedDateResult := gjson.GetBytes(recordsJson, path)
+	finalLastModifiedDateResult := gjson.GetBytes(recordsJSON, path)
 	finalLastModifiedDateString := finalLastModifiedDateResult.String()
-	// loop backwards until we hit a different date, incrementing the offset each time.
-	for i := finalArrayIndex; i >= 0; i-- {
-		// break if the date is different
-		path := fmt.Sprintf("%d.LastModifiedDate", i)
-		if gjson.GetBytes(recordsJson, path).String() != finalLastModifiedDateString {
-			break
-		}
-		// date is the same, increment offset
-		position.Offset++
-	}
 	timestamp, timestampErr := getTimestampFromResultLastModifiedDate(finalLastModifiedDateString)
 	if timestampErr != nil {
 		err = timestampErr
 		return
 	}
 	position.LastModifiedDate = &timestamp
+	position.NextURL = response.NextRecordsUrl
 	return
 }
 
@@ -257,6 +267,10 @@ func (p *LightningPoller) closeBadgerDb() {
 	errorutils.LogOnErr(nil, "error closing badger database", err)
 }
 
+func (p *LightningPoller) getNextRecordsURL(queryWithCallback QueryWithCallback) string {
+	return p.positions[queryWithCallback.PersistenceKey].NextURL
+}
+
 // getPollQuery is used to modify the base query according to configuration.
 func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (string, error) {
 	var builder strings.Builder
@@ -277,7 +291,7 @@ func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (str
 	//	position.LastModifiedDate = &correctedTime
 	//}
 	dateTimeString := getRfcFormattedUtcTimestampString(*currentPosition.LastModifiedDate)
-	builder.WriteString(fmt.Sprintf(" %s LastModifiedDate >= %s order by LastModifiedDate, Id limit %d offset %d", operator, dateTimeString, p.config.Limit, currentPosition.Offset))
+	builder.WriteString(fmt.Sprintf(" %s LastModifiedDate >= %s order by LastModifiedDate, Id", operator, dateTimeString))
 	return builder.String(), nil
 }
 
