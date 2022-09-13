@@ -166,7 +166,10 @@ func (p *LightningPoller) poll() {
 				if err != nil {
 					return
 				}
-				p.handleSalesforceResponse(queryResponse, newRecordsJSON, queryWithCallback)
+				newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
+				if newRecordsLength > 0 {
+					p.handleSalesforceResponse(queryResponse, newRecordsJSON, queryWithCallback)
+				}
 			}
 		}(queryWithCallback)
 	}
