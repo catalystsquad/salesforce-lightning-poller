@@ -201,6 +201,7 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 		newRecordsJSON, err = json.Marshal(newRecords)
 		if err != nil {
 			errorutils.LogOnErr(nil, "error marshaling new records to json", err)
+			return
 		}
 		logging.Log.WithFields(logrus.Fields{"queried_records_total": length, "removed_records": length - int64(len(newRecords))}).Debug("removed already queried records")
 		return
