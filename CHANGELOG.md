@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.0...v1.1.1) (2022-09-13)
+
+
+### Bug Fixes
+
+* save previeous record ids in position, remove dupe records ([#10](https://github.com/catalystsquad/salesforce-lightning-poller/issues/10)) ([7f73904](https://github.com/catalystsquad/salesforce-lightning-poller/commit/7f73904ecd2692134ab02b200c69726273833bdb))
+
 # [1.1.0](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.0.3...v1.1.0) (2022-09-13)
 
 
