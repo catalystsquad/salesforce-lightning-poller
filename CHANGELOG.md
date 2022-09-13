@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.0.3...v1.1.0) (2022-09-13)
+
+
+### Features
+
+* implement usage of NextRecordsUrl in SOQL response ([#8](https://github.com/catalystsquad/salesforce-lightning-poller/issues/8)) ([be0364f](https://github.com/catalystsquad/salesforce-lightning-poller/commit/be0364f24e244a6db4a55446a800c12e993f1806))
+
 ## [1.0.3](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.0.2...v1.0.3) (2022-08-29)
 
 
