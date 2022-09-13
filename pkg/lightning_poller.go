@@ -119,6 +119,7 @@ func (p *LightningPoller) poll() {
 			// attempt to query with the NextRecordsUrl first
 			nextRecordsURL := p.getNextRecordsURL(queryWithCallback)
 			if nextRecordsURL != "" {
+				logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("calling NextRecordsURL")
 				nextURLResponse, err := p.SfUtils.GetNextRecords(nextRecordsURL)
 				if err != nil {
 					// check if the NextRecordsUrl was not valid, return and
@@ -173,19 +174,19 @@ func (p *LightningPoller) handleSalesforceResponse(response pkg.SoqlResponse, qu
 }
 
 func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, recordsJSON []byte) error {
-	position, err := getPositionFromResult(response, recordsJSON)
+	newPosition, err := getPositionFromResult(response, recordsJSON)
 	if err != nil {
 		return err
 	}
-	p.positions[key] = &position
+	p.positions[key] = &newPosition
 	// update saved position if persistence is enabled
 	if p.config.PersistenceEnabled {
-		err := p.setPosition(key, position)
+		err := p.setPosition(key, newPosition)
 		if err != nil {
 			return err
 		}
 	}
-	logging.Log.WithFields(logrus.Fields{"lastModifiedDate": position.LastModifiedDate, "persistence_key": key}).Debug("updated position")
+	logging.Log.WithFields(logrus.Fields{"lastModifiedDate": newPosition.LastModifiedDate, "persistence_key": key}).Debug("updated position")
 	return nil
 }
 
