@@ -21,8 +21,9 @@ import (
 )
 
 type Position struct {
-	LastModifiedDate *time.Time
-	NextURL          string
+	LastModifiedDate  *time.Time
+	NextURL           string
+	PreviousRecordIDs []string
 }
 
 type LightningPoller struct {
@@ -130,7 +131,12 @@ func (p *LightningPoller) poll() {
 					}
 				} else {
 					if len(nextURLResponse.Records) > 0 {
-						p.handleSalesforceResponse(nextURLResponse, queryWithCallback)
+						recordsJSON, err := json.Marshal(nextURLResponse.Records)
+						if err != nil {
+							errorutils.LogOnErr(nil, "error marshaling soql query response", err)
+							return
+						}
+						p.handleSalesforceResponse(nextURLResponse, recordsJSON, queryWithCallback)
 						return
 					}
 				}
@@ -151,18 +157,57 @@ func (p *LightningPoller) poll() {
 			}
 
 			if len(queryResponse.Records) > 0 {
-				p.handleSalesforceResponse(queryResponse, queryWithCallback)
+				recordsJSON, err := json.Marshal(queryResponse.Records)
+				if err != nil {
+					errorutils.LogOnErr(nil, "error marshaling soql query response", err)
+					return
+				}
+				newRecordsJSON, err := p.removeAlreadyQueriedRecords(recordsJSON, queryWithCallback)
+				if err != nil {
+					return
+				}
+				p.handleSalesforceResponse(queryResponse, newRecordsJSON, queryWithCallback)
 			}
 		}(queryWithCallback)
 	}
 }
 
-func (p *LightningPoller) handleSalesforceResponse(response pkg.SoqlResponse, queryWithCallback QueryWithCallback) {
-	recordsJSON, err := json.Marshal(response.Records)
+// removeAlreadyQueriedRecords checks a result for records that were already
+// queried in the previous poll(). compares lastModifiedDate first to fail
+// fast, then iterates over all results and compares with the saved IDs
+func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryWithCallback QueryWithCallback) (newRecordsJSON []byte, err error) {
+	resultLastModifiedDateString := getFinalLastModifiedDateStringFromJSON(recordsJSON)
+	resultLastModifiedDate, err := getTimestampFromResultLastModifiedDate(resultLastModifiedDateString)
 	if err != nil {
-		errorutils.LogOnErr(nil, "error marshaling soql query response", err)
+		errorutils.LogOnErr(nil, "error parsing LastModifiedDate", err)
 		return
 	}
+	lastPosition := p.positions[queryWithCallback.PersistenceKey]
+	positionLastModifiedDate := lastPosition.LastModifiedDate
+	if resultLastModifiedDate.Equal(*positionLastModifiedDate) {
+		// last modified dates are the same, check IDs and skip records that are the same
+		newRecords := []interface{}{}
+		length := gjson.GetBytes(recordsJSON, "#").Int()
+		for i := int64(0); i < length; i++ {
+			record := gjson.GetBytes(recordsJSON, fmt.Sprintf("%d", i)).String()
+			recordID := gjson.GetBytes([]byte(record), "Id").String() // FIXME
+			if !stringInSlice(recordID, lastPosition.PreviousRecordIDs) {
+				newRecords = append(newRecords, record)
+			}
+		}
+
+		newRecordsJSON, err = json.Marshal(newRecords)
+		if err != nil {
+			errorutils.LogOnErr(nil, "error marshaling new records to json", err)
+		}
+		return
+	}
+	newRecordsJSON = recordsJSON
+	return
+}
+
+func (p *LightningPoller) handleSalesforceResponse(response pkg.SoqlResponse, recordsJSON []byte, queryWithCallback QueryWithCallback) {
+	var err error
 	savePosition := queryWithCallback.Callback(recordsJSON, err)
 	if savePosition {
 		positionErr := p.updatePosition(queryWithCallback.PersistenceKey, response, recordsJSON)
@@ -190,19 +235,33 @@ func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, 
 }
 
 func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte) (position Position, err error) {
-	numRecords := gjson.GetBytes(recordsJSON, "#").Int()
-	finalArrayIndex := numRecords - 1
-	path := fmt.Sprintf("%d.LastModifiedDate", finalArrayIndex)
-	finalLastModifiedDateResult := gjson.GetBytes(recordsJSON, path)
-	finalLastModifiedDateString := finalLastModifiedDateResult.String()
-	timestamp, timestampErr := getTimestampFromResultLastModifiedDate(finalLastModifiedDateString)
+	// save last modified timestamp from last record in response
+	lastModifiedDate := getFinalLastModifiedDateStringFromJSON(recordsJSON)
+	timestamp, timestampErr := getTimestampFromResultLastModifiedDate(lastModifiedDate)
 	if timestampErr != nil {
 		err = timestampErr
 		return
 	}
 	position.LastModifiedDate = &timestamp
+	// save all of the record IDs of the response
+	lastQueriedIDs := []string{}
+	gjsonIDresult := gjson.GetBytes(recordsJSON, "#.Id").Array()
+	for _, result := range gjsonIDresult {
+		lastQueriedIDs = append(lastQueriedIDs, result.String())
+	}
+	position.PreviousRecordIDs = lastQueriedIDs
+	// save the next url
 	position.NextURL = response.NextRecordsUrl
 	return
+}
+
+func getFinalLastModifiedDateStringFromJSON(recordsJSON []byte) string {
+	numRecords := gjson.GetBytes(recordsJSON, "#").Int()
+	finalArrayIndex := numRecords - 1
+	path := fmt.Sprintf("%d.LastModifiedDate", finalArrayIndex)
+	finalLastModifiedDateResult := gjson.GetBytes(recordsJSON, path)
+	finalLastModifiedDateString := finalLastModifiedDateResult.String()
+	return finalLastModifiedDateString
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -332,4 +391,13 @@ func (p *LightningPoller) setPosition(key string, position Position) error {
 
 func getTimestampFromResultLastModifiedDate(lastModifiedDate string) (timestamp time.Time, err error) {
 	return time.Parse("2006-01-02T15:04:05.000+0000", lastModifiedDate)
+}
+
+func stringInSlice(str string, slice []string) bool {
+	for _, v := range slice {
+		if v == str {
+			return true
+		}
+	}
+	return false
 }
