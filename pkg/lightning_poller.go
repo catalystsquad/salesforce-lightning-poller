@@ -198,7 +198,6 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 				newRecords = append(newRecords, record)
 			}
 		}
-
 		newRecordsJSON, err = json.Marshal(newRecords)
 		if err != nil {
 			errorutils.LogOnErr(nil, "error marshaling new records to json", err)
