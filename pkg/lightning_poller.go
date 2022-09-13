@@ -38,7 +38,6 @@ type RunConfig struct {
 	Ticker             *time.Ticker
 	PersistenceEnabled bool   `json:"persistence_enabled"`
 	PersistencePath    string `json:"persistence_path"`
-	Limit              int    `json:"limit" validate:"gte=1,lte=1000"` // limit must be between 1-1000
 }
 
 type QueryWithCallback struct {
@@ -174,18 +173,19 @@ func (p *LightningPoller) handleSalesforceResponse(response pkg.SoqlResponse, qu
 }
 
 func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, recordsJSON []byte) error {
-	position, err := getPositionFromResult(response, recordsJSON)
+	newPosition, err := getPositionFromResult(response, recordsJSON)
 	if err != nil {
 		return err
 	}
+	p.positions[key] = &newPosition
 	// update saved position if persistence is enabled
 	if p.config.PersistenceEnabled {
-		err := p.setPosition(key, position)
+		err := p.setPosition(key, newPosition)
 		if err != nil {
 			return err
 		}
 	}
-	logging.Log.WithFields(logrus.Fields{"lastModifiedDate": position.LastModifiedDate}).Debug("updated position")
+	logging.Log.WithFields(logrus.Fields{"lastModifiedDate": newPosition.LastModifiedDate, "persistence_key": key}).Debug("updated position")
 	return nil
 }
 
@@ -238,7 +238,6 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		Ticker:             time.NewTicker(viper.GetDuration("poll_interval")),
 		PersistenceEnabled: viper.GetBool("persistence_enabled"),
 		PersistencePath:    viper.GetString("persistence_path"),
-		Limit:              viper.GetInt("limit"),
 	}
 	theValidator := validator.New()
 	err := theValidator.Struct(config)
