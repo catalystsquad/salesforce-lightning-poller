@@ -2,6 +2,7 @@ package pkg
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type Position struct {
@@ -179,6 +181,7 @@ func (p *LightningPoller) poll() {
 // queried in the previous poll(). compares lastModifiedDate first to fail
 // fast, then iterates over all results and compares with the saved IDs
 func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryWithCallback QueryWithCallback) (newRecordsJSON []byte, err error) {
+	newRecordsJSON = recordsJSON
 	resultLastModifiedDateString := getFinalLastModifiedDateStringFromJSON(recordsJSON)
 	resultLastModifiedDate, err := getTimestampFromResultLastModifiedDate(resultLastModifiedDateString)
 	if err != nil {
@@ -188,25 +191,28 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 	lastPosition := p.positions[queryWithCallback.PersistenceKey]
 	positionLastModifiedDate := lastPosition.LastModifiedDate
 	if resultLastModifiedDate.Equal(*positionLastModifiedDate) {
-		// last modified dates are the same, check IDs and skip records that are the same
-		newRecords := []interface{}{}
+		// last modified dates are the same, check IDs and delete records that have matching IDs
 		length := gjson.GetBytes(recordsJSON, "#").Int()
+		// iterator for tracking index after deletes in json occur
+		correctedIterator := 0
 		for i := int64(0); i < length; i++ {
-			record := gjson.GetBytes(recordsJSON, fmt.Sprintf("%d", i)).String()
-			recordID := gjson.GetBytes([]byte(record), "Id").String() // FIXME
-			if !stringInSlice(recordID, lastPosition.PreviousRecordIDs) {
-				newRecords = append(newRecords, record)
+			recordID := gjson.GetBytes(recordsJSON, fmt.Sprintf("%d.Id", i)).String()
+			if stringInSlice(recordID, lastPosition.PreviousRecordIDs) {
+				newRecordsJSON, err = sjson.DeleteBytes(newRecordsJSON, fmt.Sprintf("%d", correctedIterator))
+				if err != nil {
+					errorutils.LogOnErr(nil, "error removing record from json", err)
+					return
+				}
+				// decrement corrected iterator when a record is removed
+				correctedIterator--
 			}
+			// increment the correct iterator each time
+			correctedIterator++
 		}
-		newRecordsJSON, err = json.Marshal(newRecords)
-		if err != nil {
-			errorutils.LogOnErr(nil, "error marshaling new records to json", err)
-			return
-		}
-		logging.Log.WithFields(logrus.Fields{"queried_records_total": length, "removed_records": length - int64(len(newRecords))}).Debug("removed already queried records")
+		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
+		logging.Log.WithFields(logrus.Fields{"queried_records_total": length, "new_records_length": newRecordsLength}).Debug("removed already queried records")
 		return
 	}
-	newRecordsJSON = recordsJSON
 	return
 }
 
@@ -241,6 +247,11 @@ func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, 
 func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte) (position Position, err error) {
 	// save last modified timestamp from last record in response
 	lastModifiedDate := getFinalLastModifiedDateStringFromJSON(recordsJSON)
+	if lastModifiedDate == "" {
+		logging.Log.WithFields(logrus.Fields{"json": string(recordsJSON)}).Debug("could not retrieve final last modified date from records json")
+		err = errors.New("could not retrieve final last modified date from records")
+		return
+	}
 	timestamp, timestampErr := getTimestampFromResultLastModifiedDate(lastModifiedDate)
 	if timestampErr != nil {
 		err = timestampErr
