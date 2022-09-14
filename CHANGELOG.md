@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.1...v1.1.2) (2022-09-14)
+
+
+### Bug Fixes
+
+* dedupe record logic ([#11](https://github.com/catalystsquad/salesforce-lightning-poller/issues/11)) ([5893bbe](https://github.com/catalystsquad/salesforce-lightning-poller/commit/5893bbe238679923a3dc8649b8e79ed6f72e34ca))
+
 ## [1.1.1](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.0...v1.1.1) (2022-09-13)
 
 
