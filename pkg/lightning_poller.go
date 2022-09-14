@@ -210,7 +210,7 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 			correctedIterator++
 		}
 		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
-		logging.Log.WithFields(logrus.Fields{"queried_records_total": length, "new_records_length": newRecordsLength}).Debug("removed already queried records")
+		logging.Log.WithFields(logrus.Fields{"queried_records_total": length, "new_records_total": newRecordsLength}).Debug("removed already queried records")
 		return
 	}
 	return
