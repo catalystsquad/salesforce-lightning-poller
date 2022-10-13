@@ -37,10 +37,11 @@ type LightningPoller struct {
 }
 
 type RunConfig struct {
-	Queries            []QueryWithCallback `validate:"required"`
-	Ticker             *time.Ticker
-	PersistenceEnabled bool   `json:"persistence_enabled"`
-	PersistencePath    string `json:"persistence_path"`
+	Queries                 []QueryWithCallback `validate:"required"`
+	Ticker                  *time.Ticker
+	PersistenceEnabled      bool                 `json:"persistence_enabled"`
+	PersistencePath         string               `json:"persistence_path"`
+	StartupPositionOverride map[string]time.Time `json:"startup_position_override"`
 }
 
 type QueryWithCallback struct {
@@ -84,19 +85,24 @@ func (p *LightningPoller) Run() {
 func (p *LightningPoller) loadPositions() error {
 	// init poller's positions map
 	p.positions = map[string]*Position{}
-	// load position for each query based on perisstence key
+	// load position for each query based on persistence key
 	for _, query := range p.config.Queries {
 		key := query.PersistenceKey
-		if p.config.PersistenceEnabled {
-			// fetch saved position and set it on the map
-			savedPosition, err := p.getPosition([]byte(key))
-			if err != nil {
-				return err
-			}
-			p.positions[key] = savedPosition
+		// check if there is a position override for the persistence key
+		if timeOverride, exists := p.config.StartupPositionOverride[key]; exists {
+			p.positions[key] = &Position{LastModifiedDate: &timeOverride}
 		} else {
-			// persistence is disabled, initialize to zero values
-			p.positions[key] = &Position{LastModifiedDate: &time.Time{}}
+			if p.config.PersistenceEnabled {
+				// fetch saved position and set it on the map
+				savedPosition, err := p.getPosition([]byte(key))
+				if err != nil {
+					return err
+				}
+				p.positions[key] = savedPosition
+			} else {
+				// persistence is disabled, initialize to zero values
+				p.positions[key] = &Position{LastModifiedDate: &time.Time{}}
+			}
 		}
 	}
 	return nil
@@ -307,14 +313,21 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	viper.SetDefault("persistence_enabled", false)
 	viper.SetDefault("persistence_path", ".")
 	viper.SetDefault("api_version", "54.0")
+	viper.SetDefault("startup_position_override", "")
+	startupPositionOverrideAsStrings := viper.GetStringMapString("startup_position_override")
+	startupPositionOverride, err := stringMapToTimeMap(startupPositionOverrideAsStrings)
+	if err != nil {
+		return nil, errorx.Decorate(err, "error initializing config, unable to parse startup_position_override")
+	}
 	config := &RunConfig{
-		Queries:            queries,
-		Ticker:             time.NewTicker(viper.GetDuration("poll_interval")),
-		PersistenceEnabled: viper.GetBool("persistence_enabled"),
-		PersistencePath:    viper.GetString("persistence_path"),
+		Queries:                 queries,
+		Ticker:                  time.NewTicker(viper.GetDuration("poll_interval")),
+		PersistenceEnabled:      viper.GetBool("persistence_enabled"),
+		PersistencePath:         viper.GetString("persistence_path"),
+		StartupPositionOverride: startupPositionOverride,
 	}
 	theValidator := validator.New()
-	err := theValidator.Struct(config)
+	err = theValidator.Struct(config)
 	if err != nil {
 		errs := []error{}
 		for _, err := range err.(validator.ValidationErrors) {
@@ -323,6 +336,17 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		return nil, errorx.DecorateMany("error initializing config", errs...)
 	}
 	return config, nil
+}
+
+func stringMapToTimeMap(i map[string]string) (o map[string]time.Time, err error) {
+	o = map[string]time.Time{}
+	for k, v := range i {
+		o[k], err = time.Parse(time.RFC3339, v)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return o, nil
 }
 
 func (p *LightningPoller) openBadgerDb(path string) error {
