@@ -37,11 +37,11 @@ type LightningPoller struct {
 }
 
 type RunConfig struct {
-	Queries                 []QueryWithCallback `validate:"required"`
-	StartupPositionOverride map[string]time.Time
-	Ticker                  *time.Ticker
-	PersistenceEnabled      bool   `json:"persistence_enabled"`
-	PersistencePath         string `json:"persistence_path"`
+	Queries                  []QueryWithCallback `validate:"required"`
+	StartupPositionOverrides map[string]time.Time
+	Ticker                   *time.Ticker
+	PersistenceEnabled       bool   `json:"persistence_enabled"`
+	PersistencePath          string `json:"persistence_path"`
 }
 
 type QueryWithCallback struct {
@@ -89,7 +89,7 @@ func (p *LightningPoller) loadPositions() error {
 	for _, query := range p.config.Queries {
 		key := query.PersistenceKey
 		// check if there is a position override for the persistence key
-		if timeOverride, exists := p.config.StartupPositionOverride[key]; exists {
+		if timeOverride, exists := p.config.StartupPositionOverrides[key]; exists {
 			p.positions[key] = &Position{LastModifiedDate: &timeOverride}
 		} else {
 			if p.config.PersistenceEnabled {
@@ -314,18 +314,19 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	viper.SetDefault("persistence_path", ".")
 	viper.SetDefault("api_version", "54.0")
 	viper.SetDefault("startup_position_override", "")
-	startupPositionOverrideAsStrings := viper.GetStringMapString("startup_position_override")
-	startupPositionOverride, err := stringMapToTimeMap(startupPositionOverrideAsStrings)
+	startupPositionOverridesAsStrings := viper.GetStringMapString("startup_position_overrides")
+	logging.Log.WithFields(logrus.Fields{"startupPositionOverridesAsStrings": startupPositionOverridesAsStrings}).Debug("startup position overrides as strings")
+	startupPositionOverrides, err := stringMapToTimeMap(startupPositionOverridesAsStrings)
 	if err != nil {
 		return nil, errorx.Decorate(err, "error initializing config, unable to parse startup_position_override")
 	}
-	logging.Log.WithFields(logrus.Fields{"startupPositionOverride": startupPositionOverride}).Debug("startup position override")
+	logging.Log.WithFields(logrus.Fields{"startupPositionOverrides": startupPositionOverrides}).Debug("startup position overrides")
 	config := &RunConfig{
-		Queries:                 queries,
-		Ticker:                  time.NewTicker(viper.GetDuration("poll_interval")),
-		PersistenceEnabled:      viper.GetBool("persistence_enabled"),
-		PersistencePath:         viper.GetString("persistence_path"),
-		StartupPositionOverride: startupPositionOverride,
+		Queries:                  queries,
+		Ticker:                   time.NewTicker(viper.GetDuration("poll_interval")),
+		PersistenceEnabled:       viper.GetBool("persistence_enabled"),
+		PersistencePath:          viper.GetString("persistence_path"),
+		StartupPositionOverrides: startupPositionOverrides,
 	}
 	theValidator := validator.New()
 	err = theValidator.Struct(config)
