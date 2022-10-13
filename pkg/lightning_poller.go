@@ -38,10 +38,10 @@ type LightningPoller struct {
 
 type RunConfig struct {
 	Queries                 []QueryWithCallback `validate:"required"`
+	StartupPositionOverride map[string]time.Time
 	Ticker                  *time.Ticker
-	PersistenceEnabled      bool                 `json:"persistence_enabled"`
-	PersistencePath         string               `json:"persistence_path"`
-	StartupPositionOverride map[string]time.Time `json:"startup_position_override"`
+	PersistenceEnabled      bool   `json:"persistence_enabled"`
+	PersistencePath         string `json:"persistence_path"`
 }
 
 type QueryWithCallback struct {
@@ -319,6 +319,7 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	if err != nil {
 		return nil, errorx.Decorate(err, "error initializing config, unable to parse startup_position_override")
 	}
+	logging.Log.WithFields(logrus.Fields{"startupPositionOverride": startupPositionOverride}).Debug("startup position override")
 	config := &RunConfig{
 		Queries:                 queries,
 		Ticker:                  time.NewTicker(viper.GetDuration("poll_interval")),
