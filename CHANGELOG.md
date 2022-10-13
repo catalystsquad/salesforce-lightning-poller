@@ -1,3 +1,10 @@
+## [1.1.4](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.3...v1.1.4) (2022-10-13)
+
+
+### Bug Fixes
+
+* stringToTimeMap func, return empty map if string is empty ([#14](https://github.com/catalystsquad/salesforce-lightning-poller/issues/14)) ([f36df3f](https://github.com/catalystsquad/salesforce-lightning-poller/commit/f36df3fc26d7a5b5e531fd3de4645ebf3c7393bd))
+
 ## [1.1.3](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.2...v1.1.3) (2022-10-13)
 
 
