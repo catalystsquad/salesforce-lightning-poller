@@ -340,15 +340,17 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 
 func stringToTimeMap(i string) (o map[string]time.Time, err error) {
 	o = map[string]time.Time{}
-	stringArray := strings.Split(i, ",")
-	for _, s := range stringArray {
-		kvp := strings.Split(s, "=")
-		if len(kvp) != 2 {
-			return nil, errorx.IllegalArgument.New("string map invalid format")
-		}
-		o[kvp[0]], err = time.Parse(time.RFC3339, kvp[1])
-		if err != nil {
-			return nil, err
+	if i != "" {
+		stringArray := strings.Split(i, ",")
+		for _, s := range stringArray {
+			kvp := strings.Split(s, "=")
+			if len(kvp) != 2 {
+				return nil, errorx.IllegalArgument.New("string map invalid format")
+			}
+			o[kvp[0]], err = time.Parse(time.RFC3339, kvp[1])
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	return o, nil
