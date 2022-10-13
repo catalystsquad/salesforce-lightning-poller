@@ -314,6 +314,8 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	viper.SetDefault("persistence_path", ".")
 	viper.SetDefault("api_version", "54.0")
 	viper.SetDefault("startup_position_overrides", "")
+	testStringMap := viper.GetString("startup_position_overrides")
+	logging.Log.WithFields(logrus.Fields{"startupPositionOverrides": testStringMap}).Debug("startup position overrides as one string")
 	startupPositionOverridesAsStrings := viper.GetStringMapString("startup_position_overrides")
 	logging.Log.WithFields(logrus.Fields{"startupPositionOverridesAsStrings": startupPositionOverridesAsStrings}).Debug("startup position overrides as strings")
 	startupPositionOverrides, err := stringMapToTimeMap(startupPositionOverridesAsStrings)
