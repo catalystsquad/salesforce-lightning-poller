@@ -1,3 +1,10 @@
+## [1.1.3](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.2...v1.1.3) (2022-10-13)
+
+
+### Bug Fixes
+
+* implement a starting position override configuration ([#13](https://github.com/catalystsquad/salesforce-lightning-poller/issues/13)) ([2fb8261](https://github.com/catalystsquad/salesforce-lightning-poller/commit/2fb8261192a53f30bbe9d9a637b2a5e133cc483e))
+
 ## [1.1.2](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.1...v1.1.2) (2022-09-14)
 
 
