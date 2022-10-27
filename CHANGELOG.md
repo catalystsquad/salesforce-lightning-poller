@@ -1,3 +1,10 @@
+## [1.1.5](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.4...v1.1.5) (2022-10-27)
+
+
+### Bug Fixes
+
+* automatically detect expired sessions and attempt reauthentication ([#15](https://github.com/catalystsquad/salesforce-lightning-poller/issues/15)) ([a013e1e](https://github.com/catalystsquad/salesforce-lightning-poller/commit/a013e1e164689dde5991cd0f4472e19717fca8d8))
+
 ## [1.1.4](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.3...v1.1.4) (2022-10-13)
 
 
