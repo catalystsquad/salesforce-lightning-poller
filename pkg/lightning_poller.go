@@ -29,11 +29,12 @@ type Position struct {
 }
 
 type LightningPoller struct {
-	config    *RunConfig
-	pollMap   *sync.Map
-	db        *badger.DB
-	SfUtils   *pkg.SalesforceUtils
-	positions map[string]*Position
+	config            *RunConfig
+	pollMap           *sync.Map
+	db                *badger.DB
+	SfUtils           *pkg.SalesforceUtils
+	positions         map[string]*Position
+	sfUtilsReAuthLock *sync.Mutex
 }
 
 type RunConfig struct {
@@ -160,6 +161,12 @@ func (p *LightningPoller) poll() {
 			logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
 			queryResponse, err := p.SfUtils.ExecuteSoqlQuery(query)
 			if err != nil {
+				// check if we failed due to an expired session
+				if strings.Contains(err.Error(), "INVALID_SESSION_ID") {
+					logging.Log.Error("salesforce query failed due to session expiration")
+					p.reAuthenticateSFUtils()
+					return
+				}
 				errorutils.LogOnErr(nil, "error making soql query", err)
 				return
 			}
@@ -433,6 +440,20 @@ func (p *LightningPoller) setPosition(key string, position Position) error {
 		return txn.Set([]byte(key), positionBytes)
 	})
 	return err
+}
+
+func (p *LightningPoller) reAuthenticateSFUtils() {
+	// use a mutex lock so that only one thread attempts reauthentication.
+	// return if it's locked
+	if ok := p.sfUtilsReAuthLock.TryLock(); ok {
+		defer p.sfUtilsReAuthLock.Unlock()
+		err := p.SfUtils.Authenticate()
+		if err != nil {
+			// panic if we failed, so that the service can fail and restart
+			logging.Log.WithError(err).Panic("attempted reauthenticating salesforce utils and failed")
+		}
+	}
+	return
 }
 
 func getTimestampFromResultLastModifiedDate(lastModifiedDate string) (timestamp time.Time, err error) {
