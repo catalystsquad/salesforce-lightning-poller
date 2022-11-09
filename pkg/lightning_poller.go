@@ -112,18 +112,15 @@ func (p *LightningPoller) loadPositions() error {
 func (p *LightningPoller) poll() {
 	for _, queryWithCallback := range p.config.Queries {
 		go func(queryWithCallback QueryWithCallback) {
-			defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
 			polling, ok := p.pollMap.Load(queryWithCallback.PersistenceKey)
-			if !ok {
-				// first poll, so set polling to true
-				p.pollMap.Store(queryWithCallback.PersistenceKey, true)
-			} else if polling.(bool) {
+			if ok && polling.(bool) {
 				// polling is still true, do nothing
 				logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Debug("skipping poll")
 				return
 			}
-
-			// no poll in progress, so run the query and callback
+			// no poll in progress, so run the query and callback, set polling to true
+			defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
+			p.pollMap.Store(queryWithCallback.PersistenceKey, true)
 			logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("polling")
 
 			// attempt to query with the NextRecordsUrl first
