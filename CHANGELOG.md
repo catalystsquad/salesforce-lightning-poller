@@ -1,3 +1,10 @@
+## [1.1.6](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.5...v1.1.6) (2022-11-09)
+
+
+### Bug Fixes
+
+* set poll status to true ([#16](https://github.com/catalystsquad/salesforce-lightning-poller/issues/16)) ([c5960f1](https://github.com/catalystsquad/salesforce-lightning-poller/commit/c5960f1c91f172feefde378b07c47c854ac68c3f)), closes [#6](https://github.com/catalystsquad/salesforce-lightning-poller/issues/6)
+
 ## [1.1.5](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.4...v1.1.5) (2022-10-27)
 
 
