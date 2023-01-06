@@ -80,7 +80,9 @@ func (p *LightningPoller) Run() {
 	// background each query with its own ticker
 	for _, query := range p.config.Queries {
 		go func(q QueryWithCallback) {
+			logging.Log.Debugf("starting ticker for key %s", q.PersistenceKey) // FIXME
 			for range q.Ticker.C {
+				logging.Log.Debugf("polling for for key %s", q.PersistenceKey) // FIXME
 				p.poll(q)
 			}
 		}(query)
