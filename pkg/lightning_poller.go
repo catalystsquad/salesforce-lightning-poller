@@ -326,7 +326,7 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		return nil, errorx.Decorate(err, "error initializing config, unable to parse startup_position_override")
 	}
 	logging.Log.WithFields(logrus.Fields{"startupPositionOverrides": startupPositionOverrides}).Debug("startup position overrides")
-	// set default ticker duration if duration is not specified on query
+	// set default ticker duration if ticker is not supplied with query
 	defaultTickerDuration := viper.GetDuration("poll_interval")
 	for i := range queries {
 		if queries[i].Ticker == nil {
