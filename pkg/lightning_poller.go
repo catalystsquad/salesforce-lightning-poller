@@ -87,6 +87,8 @@ func (p *LightningPoller) Run() {
 			}
 		}(query)
 	}
+	// block forever, since all of the queries are running in a routine
+	select {}
 }
 
 // loadPositions loads positions into memory, using saved state if saved state exists
@@ -117,79 +119,77 @@ func (p *LightningPoller) loadPositions() error {
 }
 
 func (p *LightningPoller) poll(queryWithCallback QueryWithCallback) {
-	go func(queryWithCallback QueryWithCallback) {
-		polling, ok := p.pollMap.Load(queryWithCallback.PersistenceKey)
-		if ok && polling.(bool) {
-			// polling is still true, do nothing
-			logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Debug("skipping poll")
-			return
-		}
-		// no poll in progress, so run the query and callback, set polling to true
-		defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
-		p.pollMap.Store(queryWithCallback.PersistenceKey, true)
-		logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("polling")
+	polling, ok := p.pollMap.Load(queryWithCallback.PersistenceKey)
+	if ok && polling.(bool) {
+		// polling is still true, do nothing
+		logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Debug("skipping poll")
+		return
+	}
+	// no poll in progress, so run the query and callback, set polling to true
+	defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
+	p.pollMap.Store(queryWithCallback.PersistenceKey, true)
+	logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("polling")
 
-		// attempt to query with the NextRecordsUrl first
-		nextRecordsURL := p.getNextRecordsURL(queryWithCallback)
-		if nextRecordsURL != "" {
-			nextURLResponse, err := p.SfUtils.GetNextRecords(nextRecordsURL)
-			if err != nil {
-				// check if the NextRecordsUrl was not valid, return and
-				// log if it was some other error
-				// TODO could check the error better than this
-				if !strings.Contains(err.Error(), "INVALID_QUERY_LOCATOR") {
-					errorutils.LogOnErr(nil, "error getting next records", err)
+	// attempt to query with the NextRecordsUrl first
+	nextRecordsURL := p.getNextRecordsURL(queryWithCallback)
+	if nextRecordsURL != "" {
+		nextURLResponse, err := p.SfUtils.GetNextRecords(nextRecordsURL)
+		if err != nil {
+			// check if the NextRecordsUrl was not valid, return and
+			// log if it was some other error
+			// TODO could check the error better than this
+			if !strings.Contains(err.Error(), "INVALID_QUERY_LOCATOR") {
+				errorutils.LogOnErr(nil, "error getting next records", err)
+				return
+			}
+		} else {
+			if len(nextURLResponse.Records) > 0 {
+				recordsJSON, err := json.Marshal(nextURLResponse.Records)
+				if err != nil {
+					errorutils.LogOnErr(nil, "error marshaling soql query response", err)
 					return
 				}
-			} else {
-				if len(nextURLResponse.Records) > 0 {
-					recordsJSON, err := json.Marshal(nextURLResponse.Records)
-					if err != nil {
-						errorutils.LogOnErr(nil, "error marshaling soql query response", err)
-						return
-					}
-					p.handleSalesforceResponse(nextURLResponse, recordsJSON, queryWithCallback)
-					return
-				}
-			}
-		}
-		// if we got here, then the NextRecordsUrl was empty, failed, or
-		// had an empty reponse so query salesforce with the configured
-		// query
-		query, err := p.getPollQuery(queryWithCallback)
-		if err != nil {
-			errorutils.LogOnErr(nil, "error building query", err)
-			return
-		}
-		logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
-		queryResponse, err := p.SfUtils.ExecuteSoqlQuery(query)
-		if err != nil {
-			// check if we failed due to an expired session
-			if strings.Contains(err.Error(), "INVALID_SESSION_ID") {
-				logging.Log.Error("salesforce query failed due to session expiration")
-				p.reAuthenticateSFUtils()
+				p.handleSalesforceResponse(nextURLResponse, recordsJSON, queryWithCallback)
 				return
 			}
-			errorutils.LogOnErr(nil, "error making soql query", err)
+		}
+	}
+	// if we got here, then the NextRecordsUrl was empty, failed, or
+	// had an empty reponse so query salesforce with the configured
+	// query
+	query, err := p.getPollQuery(queryWithCallback)
+	if err != nil {
+		errorutils.LogOnErr(nil, "error building query", err)
+		return
+	}
+	logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
+	queryResponse, err := p.SfUtils.ExecuteSoqlQuery(query)
+	if err != nil {
+		// check if we failed due to an expired session
+		if strings.Contains(err.Error(), "INVALID_SESSION_ID") {
+			logging.Log.Error("salesforce query failed due to session expiration")
+			p.reAuthenticateSFUtils()
 			return
 		}
+		errorutils.LogOnErr(nil, "error making soql query", err)
+		return
+	}
 
-		if len(queryResponse.Records) > 0 {
-			recordsJSON, err := json.Marshal(queryResponse.Records)
-			if err != nil {
-				errorutils.LogOnErr(nil, "error marshaling soql query response", err)
-				return
-			}
-			newRecordsJSON, err := p.removeAlreadyQueriedRecords(recordsJSON, queryWithCallback)
-			if err != nil {
-				return
-			}
-			newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
-			if newRecordsLength > 0 {
-				p.handleSalesforceResponse(queryResponse, newRecordsJSON, queryWithCallback)
-			}
+	if len(queryResponse.Records) > 0 {
+		recordsJSON, err := json.Marshal(queryResponse.Records)
+		if err != nil {
+			errorutils.LogOnErr(nil, "error marshaling soql query response", err)
+			return
 		}
-	}(queryWithCallback)
+		newRecordsJSON, err := p.removeAlreadyQueriedRecords(recordsJSON, queryWithCallback)
+		if err != nil {
+			return
+		}
+		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
+		if newRecordsLength > 0 {
+			p.handleSalesforceResponse(queryResponse, newRecordsJSON, queryWithCallback)
+		}
+	}
 }
 
 // removeAlreadyQueriedRecords checks a result for records that were already
