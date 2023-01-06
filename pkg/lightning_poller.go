@@ -77,7 +77,7 @@ func (p *LightningPoller) Run() {
 	defer p.closeBadgerDb()
 	err := p.loadPositions()
 	errorutils.PanicOnErr(nil, "error loading poller position", err)
-	// background each query with it's own ticker
+	// background each query with its own ticker
 	for _, query := range p.config.Queries {
 		go func(q QueryWithCallback) {
 			for range q.Ticker.C {
@@ -451,7 +451,7 @@ func (p *LightningPoller) setPosition(key string, position Position) error {
 
 func (p *LightningPoller) reAuthenticateSFUtils() {
 	// use a mutex lock so that only one thread attempts reauthentication.
-	// return if its locked
+	// return if it's locked
 	if ok := p.sfUtilsReAuthLock.TryLock(); ok {
 		defer p.sfUtilsReAuthLock.Unlock()
 		err := p.SfUtils.Authenticate()
