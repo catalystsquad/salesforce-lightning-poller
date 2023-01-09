@@ -48,7 +48,14 @@ type QueryWithCallback struct {
 	Query          func() string                       `json:"query" validate:"required"`
 	PersistenceKey string                              `json:"persistenceKey"`
 	Callback       func(result []byte, err error) bool `validate:"required"`
-	Ticker         *time.Ticker
+	// Allows overriding the default ticker duration
+	Ticker *time.Ticker
+	// Queries for all results by iterating through the nextRecordsURL, ignores
+	// the lastmodifiedDate in the position and ignores previously queried
+	// records. This is for special cases, such as querying for picklist
+	// values, where the ticker duration is longer than the nextRecordsURL
+	// timeout period
+	QueryAllRecords bool
 }
 
 func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config) (*LightningPoller, error) {
@@ -82,7 +89,7 @@ func (p *LightningPoller) Run() {
 		go func(q QueryWithCallback) {
 			logging.Log.Debugf("starting ticker for key %s", q.PersistenceKey) // FIXME
 			for range q.Ticker.C {
-				logging.Log.Debugf("polling for for key %s", q.PersistenceKey) // FIXME
+				logging.Log.Debugf("polling for key %s", q.PersistenceKey) // FIXME
 				p.poll(q)
 			}
 		}(query)
@@ -176,20 +183,46 @@ func (p *LightningPoller) poll(queryWithCallback QueryWithCallback) {
 	}
 
 	if len(queryResponse.Records) > 0 {
-		recordsJSON, err := json.Marshal(queryResponse.Records)
+		records := queryResponse.Records
+		// query all records if configured
+		if queryWithCallback.QueryAllRecords && queryResponse.NextRecordsUrl != "" {
+			records, err = p.queryAllRecords(queryResponse, queryWithCallback)
+			if err != nil {
+				return
+			}
+		}
+		recordsJSON, err := json.Marshal(records)
 		if err != nil {
 			errorutils.LogOnErr(nil, "error marshaling soql query response", err)
 			return
 		}
-		newRecordsJSON, err := p.removeAlreadyQueriedRecords(recordsJSON, queryWithCallback)
-		if err != nil {
-			return
+		if !queryWithCallback.QueryAllRecords {
+			recordsJSON, err = p.removeAlreadyQueriedRecords(recordsJSON, queryWithCallback)
+			if err != nil {
+				return
+			}
 		}
-		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
-		if newRecordsLength > 0 {
-			p.handleSalesforceResponse(queryResponse, newRecordsJSON, queryWithCallback)
+		recordsLength := gjson.GetBytes(recordsJSON, "#").Int()
+		if recordsLength > 0 {
+			p.handleSalesforceResponse(queryResponse, recordsJSON, queryWithCallback)
 		}
 	}
+}
+
+func (p *LightningPoller) queryAllRecords(initialResponse pkg.SoqlResponse, queryWithCallback QueryWithCallback) ([]interface{}, error) {
+	records := initialResponse.Records
+	nextRecordsURL := initialResponse.NextRecordsUrl
+	// iterate until NextRecordsUrl is empty
+	for nextRecordsURL != "" {
+		queryResponse, err := p.SfUtils.GetNextRecords(nextRecordsURL)
+		if err != nil {
+			errorutils.LogOnErr(nil, "error getting next records", err)
+			return nil, err
+		}
+		nextRecordsURL = queryResponse.NextRecordsUrl
+		records = append(records, queryResponse.Records...)
+	}
+	return records, nil
 }
 
 // removeAlreadyQueriedRecords checks a result for records that were already
@@ -234,7 +267,7 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 func (p *LightningPoller) handleSalesforceResponse(response pkg.SoqlResponse, recordsJSON []byte, queryWithCallback QueryWithCallback) {
 	var err error
 	savePosition := queryWithCallback.Callback(recordsJSON, err)
-	if savePosition {
+	if savePosition && !queryWithCallback.QueryAllRecords {
 		positionErr := p.updatePosition(queryWithCallback.PersistenceKey, response, recordsJSON)
 		if positionErr != nil {
 			errorutils.LogOnErr(nil, "error updating position", positionErr)
@@ -393,6 +426,11 @@ func (p *LightningPoller) getNextRecordsURL(queryWithCallback QueryWithCallback)
 
 // getPollQuery is used to modify the base query according to configuration.
 func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (string, error) {
+	if queryWithCallback.QueryAllRecords {
+		// if QueryAllRecords is enabled, then return the query as is without
+		// an extra where clause
+		return queryWithCallback.Query(), nil
+	}
 	var builder strings.Builder
 	builder.WriteString(queryWithCallback.Query())
 	// query for last updated and update query based on stored timestamp
