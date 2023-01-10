@@ -118,8 +118,10 @@ func (p *LightningPoller) poll() {
 
 func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) {
 	// recursive loop to drill down to the innermost dependency and then move upwards so that all dependent objects are queried first
-	if queryWithCallback.DependsOn != nil {
-		p.runQuery(*queryWithCallback.DependsOn)
+	if len(queryWithCallback.DependsOn) > 0 {
+		for _, dependency := range queryWithCallback.DependsOn {
+			p.runQuery(dependency)
+		}
 	}
 	polling, ok := p.pollMap.Load(queryWithCallback.PersistenceKey)
 	if ok && polling.(bool) {
