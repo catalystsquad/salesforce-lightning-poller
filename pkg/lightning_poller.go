@@ -49,7 +49,7 @@ type QueryWithCallback struct {
 	Query          func() string                       `json:"query" validate:"required"`
 	PersistenceKey string                              `json:"persistenceKey"`
 	Callback       func(result []byte, err error) bool `validate:"required"`
-	DependsOn      *QueryWithCallback
+	DependsOn      []QueryWithCallback
 }
 
 func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config) (*LightningPoller, error) {
