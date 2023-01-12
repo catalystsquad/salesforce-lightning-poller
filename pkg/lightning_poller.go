@@ -89,22 +89,37 @@ func (p *LightningPoller) loadPositions() error {
 	p.positions = map[string]*Position{}
 	// load position for each query based on persistence key
 	for _, query := range p.config.Queries {
-		key := query.PersistenceKey
-		// check if there is a position override for the persistence key
-		if timeOverride, exists := p.config.StartupPositionOverrides[key]; exists {
-			p.positions[key] = &Position{LastModifiedDate: &timeOverride}
-		} else {
-			if p.config.PersistenceEnabled {
-				// fetch saved position and set it on the map
-				savedPosition, err := p.getPosition([]byte(key))
-				if err != nil {
-					return err
-				}
-				p.positions[key] = savedPosition
-			} else {
-				// persistence is disabled, initialize to zero values
-				p.positions[key] = &Position{LastModifiedDate: &time.Time{}}
+		err := p.loadPosition(query)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *LightningPoller) loadPosition(query QueryWithCallback) error {
+	// recursively load positions for dependencies
+	for _, dependency := range query.DependsOn {
+		err := p.loadPosition(dependency)
+		if err != nil {
+			return err
+		}
+	}
+	// check if there is a position override for the persistence key
+	key := query.PersistenceKey
+	if timeOverride, exists := p.config.StartupPositionOverrides[key]; exists {
+		p.positions[key] = &Position{LastModifiedDate: &timeOverride}
+	} else {
+		if p.config.PersistenceEnabled {
+			// fetch saved position and set it on the map
+			savedPosition, err := p.getPosition([]byte(key))
+			if err != nil {
+				return err
 			}
+			p.positions[key] = savedPosition
+		} else {
+			// persistence is disabled, initialize to zero values
+			p.positions[key] = &Position{LastModifiedDate: &time.Time{}}
 		}
 	}
 	return nil
