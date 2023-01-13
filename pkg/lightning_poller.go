@@ -155,7 +155,7 @@ func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) error {
 	}
 	if p.isPolling(queryWithCallback) {
 		// polling is still true, do nothing
-		logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Debug("skipping poll")
+		logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Info("skipping poll")
 		return nil
 	}
 	// no poll in progress, so run the query and callback until there are no more records to consume
@@ -438,7 +438,7 @@ func (p *LightningPoller) reAuthenticateSFUtils() {
 func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, error) {
 	defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
 	p.pollMap.Store(queryWithCallback.PersistenceKey, true)
-	logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("querying")
+	logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Info("querying")
 
 	// attempt to query with the NextRecordsUrl first
 	nextRecordsURL := p.getNextRecordsURL(queryWithCallback)
