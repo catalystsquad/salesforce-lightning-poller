@@ -142,6 +142,11 @@ func (p *LightningPoller) isPolling(queryWithCallback QueryWithCallback) bool {
 }
 
 func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) error {
+	if p.isPolling(queryWithCallback) {
+		// polling is still true, do nothing
+		logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Info("skipping poll")
+		return nil
+	}
 	defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
 	p.pollMap.Store(queryWithCallback.PersistenceKey, true)
 	var err error
@@ -154,11 +159,6 @@ func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) error {
 				return err
 			}
 		}
-	}
-	if p.isPolling(queryWithCallback) {
-		// polling is still true, do nothing
-		logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Info("skipping poll")
-		return nil
 	}
 	// no poll in progress, so run the query and callback until there are no more records to consume
 	shouldQuery := true
