@@ -499,8 +499,9 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
 		if newRecordsLength > 0 {
 			p.handleSalesforceResponse(queryResponse, newRecordsJSON, queryWithCallback)
+			return true, nil
 		}
-		return true, nil
+		return false, nil
 	} else {
 		return false, nil
 	}
