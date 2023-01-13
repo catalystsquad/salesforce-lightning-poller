@@ -142,6 +142,8 @@ func (p *LightningPoller) isPolling(queryWithCallback QueryWithCallback) bool {
 }
 
 func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) error {
+	defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
+	p.pollMap.Store(queryWithCallback.PersistenceKey, true)
 	var err error
 	// recursive loop to drill down to the innermost dependency and then move upwards so that all dependent objects are queried first
 	if len(queryWithCallback.DependsOn) > 0 {
@@ -436,8 +438,6 @@ func (p *LightningPoller) reAuthenticateSFUtils() {
 }
 
 func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, error) {
-	defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
-	p.pollMap.Store(queryWithCallback.PersistenceKey, true)
 	logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Info("querying")
 
 	// attempt to query with the NextRecordsUrl first
