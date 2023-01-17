@@ -3,9 +3,12 @@ module github.com/catalystsquad/salesforce-lightning-poller
 go 1.18
 
 require (
+	github.com/MatthewsREIS/protos-api v1.1.100
+	github.com/artonge/go-csv-tag/v2 v2.1.0
 	github.com/catalystsquad/app-utils-go v1.0.4
 	github.com/catalystsquad/salesforce-utils v1.0.2
 	github.com/dgraph-io/badger/v3 v3.2103.2
+	github.com/emirpasic/gods v1.18.1
 	github.com/go-playground/validator/v10 v10.11.0
 	github.com/joomcode/errorx v1.1.0
 	github.com/sirupsen/logrus v1.8.1
@@ -13,6 +16,8 @@ require (
 	github.com/spf13/viper v1.11.0
 	github.com/tidwall/gjson v1.14.2
 	github.com/tidwall/sjson v1.2.5
+	google.golang.org/grpc v1.45.0
+	google.golang.org/protobuf v1.28.0
 )
 
 require (
@@ -55,7 +60,7 @@ require (
 	golang.org/x/net v0.0.0-20220412020605-290c469a71a5 // indirect
 	golang.org/x/sys v0.0.0-20220412211240-33da011f77ad // indirect
 	golang.org/x/text v0.3.7 // indirect
-	google.golang.org/protobuf v1.28.0 // indirect
+	google.golang.org/genproto v0.0.0-20220407144326-9054f6ed7bac // indirect
 	gopkg.in/ini.v1 v1.66.4 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
