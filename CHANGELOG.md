@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.6...v1.2.0) (2023-01-17)
+
+
+### Features
+
+* support dependencies in queries ([#17](https://github.com/catalystsquad/salesforce-lightning-poller/issues/17)) ([2f8de32](https://github.com/catalystsquad/salesforce-lightning-poller/commit/2f8de327c2c7105a2411775bd62b1d8f3f90611b))
+
 ## [1.1.6](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.1.5...v1.1.6) (2022-11-09)
 
 
