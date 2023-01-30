@@ -30,11 +30,18 @@ type Position struct {
 
 type LightningPoller struct {
 	config            *RunConfig
-	pollMap           *sync.Map
 	db                *badger.DB
 	SfUtils           *pkg.SalesforceUtils
 	positions         map[string]*Position
 	sfUtilsReAuthLock *sync.Mutex
+	// inProgressQueries tracks whether a query is currently running, to
+	// prevent future polls from starting a duplicate query
+	inProgressQueries   map[string]bool
+	inProgressQueriesMu *sync.Mutex
+	// upToDateQueries tracks whether a query is caught up with the latest
+	// objects in salesforce for managing when to wait for dependencies
+	upToDateQueries   map[string]bool
+	upToDateQueriesMu *sync.Mutex
 }
 
 type RunConfig struct {
@@ -49,23 +56,53 @@ type QueryWithCallback struct {
 	Query          func() string                       `json:"query" validate:"required"`
 	PersistenceKey string                              `json:"persistenceKey"`
 	Callback       func(result []byte, err error) bool `validate:"required"`
-	DependsOn      []QueryWithCallback
+	DependsOn      []string
 }
 
 func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config) (*LightningPoller, error) {
 	poller := &LightningPoller{
-		pollMap: &sync.Map{},
+		inProgressQueries:   make(map[string]bool),
+		inProgressQueriesMu: &sync.Mutex{},
+		upToDateQueries:     make(map[string]bool),
+		upToDateQueriesMu:   &sync.Mutex{},
 	}
+	poller.initMaps(queries)
 	config, err := initConfig(queries)
 	if err != nil {
 		return nil, err
 	}
 	poller.config = config
+	err = poller.validateDependsOn()
+	if err != nil {
+		return nil, err
+	}
 	poller.SfUtils, err = pkg.NewSalesforceUtils(true, sfConfig)
 	if err != nil {
 		return nil, err
 	}
 	return poller, err
+}
+
+// initMaps adds all persistenceKeys to the maps used for tracking what queries
+// are currently running
+func (p *LightningPoller) initMaps(queries []QueryWithCallback) {
+	for _, query := range queries {
+		p.inProgressQueries[query.PersistenceKey] = false
+		p.upToDateQueries[query.PersistenceKey] = false
+	}
+}
+
+// validateDependsOn iterates over all dependsOn fields and ensures that they
+// reference a real persistenceKey by checking the keys of the inProgressQueries
+func (p *LightningPoller) validateDependsOn() error {
+	for _, query := range p.config.Queries {
+		for _, dependency := range query.DependsOn {
+			if _, ok := p.inProgressQueries[dependency]; !ok {
+				return errors.New("dependsOn field includes a persistenceKey that does not exist")
+			}
+		}
+	}
+	return nil
 }
 
 func (p *LightningPoller) Run() {
@@ -98,13 +135,6 @@ func (p *LightningPoller) loadPositions() error {
 }
 
 func (p *LightningPoller) loadPosition(query QueryWithCallback) error {
-	// recursively load positions for dependencies
-	for _, dependency := range query.DependsOn {
-		err := p.loadPosition(dependency)
-		if err != nil {
-			return err
-		}
-	}
 	// check if there is a position override for the persistence key
 	key := query.PersistenceKey
 	if timeOverride, exists := p.config.StartupPositionOverrides[key]; exists {
@@ -136,31 +166,63 @@ func (p *LightningPoller) poll() {
 	}
 }
 
-func (p *LightningPoller) isPolling(queryWithCallback QueryWithCallback) bool {
-	polling, ok := p.pollMap.Load(queryWithCallback.PersistenceKey)
-	return ok && polling.(bool)
+// checkInProgressAndLock will check to see if a previoius poll is still in progress
+// for the given query, and update the inProgressQueries map if it is not
+// currently polling. we use a mutex here to ensure that two threads don't
+// attempt to read from the map before one writes to it
+func (p *LightningPoller) checkInProgressAndLock(queryWithCallback QueryWithCallback) bool {
+	p.inProgressQueriesMu.Lock()
+	defer p.inProgressQueriesMu.Unlock()
+	if p.inProgressQueries[queryWithCallback.PersistenceKey] {
+		return true
+	}
+	p.inProgressQueries[queryWithCallback.PersistenceKey] = true
+	return false
+}
+
+// unlockInProgressQuery will unlock the persistenceKey in the
+// inProgressQueries map
+func (p *LightningPoller) unlockInProgressQuery(queryWithCallback QueryWithCallback) {
+	p.inProgressQueriesMu.Lock()
+	defer p.inProgressQueriesMu.Unlock()
+	p.inProgressQueries[queryWithCallback.PersistenceKey] = false
+}
+
+// dependenciesUpToDate checks if all of an object's dependencies are up to
+// date yet
+func (p *LightningPoller) dependenciesUpToDate(queryWithCallback QueryWithCallback) bool {
+	p.upToDateQueriesMu.Lock()
+	defer p.upToDateQueriesMu.Unlock()
+	for _, dependency := range queryWithCallback.DependsOn {
+		if !p.upToDateQueries[dependency] {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *LightningPoller) setUpToDateQuery(val bool, queryWithCallback QueryWithCallback) {
+	p.upToDateQueriesMu.Lock()
+	defer p.upToDateQueriesMu.Unlock()
+	p.upToDateQueries[queryWithCallback.PersistenceKey] = val
 }
 
 func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) error {
-	if p.isPolling(queryWithCallback) {
+	if p.checkInProgressAndLock(queryWithCallback) {
 		// polling is still true, do nothing
 		logging.Log.WithFields(logrus.Fields{"reason": "previous poll still in progress", "persistence_key": queryWithCallback.PersistenceKey}).Info("skipping poll")
 		return nil
 	}
-	defer p.pollMap.Store(queryWithCallback.PersistenceKey, false)
-	p.pollMap.Store(queryWithCallback.PersistenceKey, true)
-	var err error
-	// recursive loop to drill down to the innermost dependency and then move upwards so that all dependent objects are queried first
-	if len(queryWithCallback.DependsOn) > 0 {
-		for _, dependency := range queryWithCallback.DependsOn {
-			err := p.runQuery(dependency)
-			if err != nil {
-				logging.Log.WithError(err).Error("error handling dependent objects, skipping the rest of the objects for this poll cycle")
-				return err
-			}
-		}
+	defer p.unlockInProgressQuery(queryWithCallback)
+
+	if !p.dependenciesUpToDate(queryWithCallback) {
+		logging.Log.WithFields(logrus.Fields{"reason": "dependencies are not up to date", "persistence_key": queryWithCallback.PersistenceKey}).Info("skipping poll")
+		return nil
 	}
-	// no poll in progress, so run the query and callback until there are no more records to consume
+
+	// no poll in progress, so run the query and callback until there are no
+	// more records to consume
+	var err error
 	shouldQuery := true
 	for shouldQuery == true {
 		shouldQuery, err = p.doQuery(queryWithCallback)
@@ -460,8 +522,10 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 				return false, err
 			}
 			p.handleSalesforceResponse(nextURLResponse, recordsJSON, queryWithCallback)
+			p.setUpToDateQuery(nextURLResponse.Done, queryWithCallback)
 			return true, nil
 		} else {
+			p.setUpToDateQuery(nextURLResponse.Done, queryWithCallback)
 			return false, nil
 		}
 	}
@@ -499,12 +563,12 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
 		if newRecordsLength > 0 {
 			p.handleSalesforceResponse(queryResponse, newRecordsJSON, queryWithCallback)
+			p.setUpToDateQuery(queryResponse.Done, queryWithCallback)
 			return true, nil
 		}
-		return false, nil
-	} else {
-		return false, nil
 	}
+	p.setUpToDateQuery(queryResponse.Done, queryWithCallback)
+	return false, nil
 }
 
 func getTimestampFromResultLastModifiedDate(lastModifiedDate string) (timestamp time.Time, err error) {
