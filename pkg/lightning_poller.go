@@ -215,16 +215,16 @@ func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) error {
 	}
 	defer p.unlockInProgressQuery(queryWithCallback)
 
-	if !p.dependenciesUpToDate(queryWithCallback) {
-		logging.Log.WithFields(logrus.Fields{"reason": "dependencies are not up to date", "persistence_key": queryWithCallback.PersistenceKey}).Info("skipping poll")
-		return nil
-	}
-
 	// no poll in progress, so run the query and callback until there are no
 	// more records to consume
 	var err error
 	shouldQuery := true
-	for shouldQuery == true {
+	for shouldQuery {
+		// check in the middle of the loop in case the dependencies change
+		if !p.dependenciesUpToDate(queryWithCallback) {
+			logging.Log.WithFields(logrus.Fields{"reason": "dependencies are not up to date", "persistence_key": queryWithCallback.PersistenceKey}).Info("skipping poll")
+			return nil
+		}
 		shouldQuery, err = p.doQuery(queryWithCallback)
 		if err != nil {
 			return err
@@ -496,7 +496,6 @@ func (p *LightningPoller) reAuthenticateSFUtils() {
 			logging.Log.WithError(err).Panic("attempted reauthenticating salesforce utils and failed")
 		}
 	}
-	return
 }
 
 func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, error) {
