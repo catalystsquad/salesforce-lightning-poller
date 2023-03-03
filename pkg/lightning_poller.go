@@ -538,7 +538,7 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 		return false, err
 	}
 	logging.Log.WithFields(logrus.Fields{"query": query}).Debug("query")
-	queryResponse, err := p.SfUtils.ExecuteSoqlQuery(query)
+	queryResponse, err := p.SfUtils.ExecuteSoqlQueryAll(query)
 	if err != nil {
 		// check if we failed due to an expired session
 		if strings.Contains(err.Error(), "INVALID_SESSION_ID") {
