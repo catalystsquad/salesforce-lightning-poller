@@ -1,3 +1,10 @@
+## [1.2.2](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.2.1...v1.2.2) (2023-03-03)
+
+
+### Bug Fixes
+
+* implement soql queryall endpoint ([#20](https://github.com/catalystsquad/salesforce-lightning-poller/issues/20)) ([be896fd](https://github.com/catalystsquad/salesforce-lightning-poller/commit/be896fd3abf15b73c90a89aabf3c69d28ff6f21c))
+
 ## [1.2.1](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.2.0...v1.2.1) (2023-01-30)
 
 
