@@ -25,7 +25,7 @@ import (
 type Position struct {
 	LastModifiedDate  *time.Time
 	NextURL           string
-	PreviousRecordIDs []string
+	PreviousRecordIDs map[string]*time.Time
 }
 
 type LightningPoller struct {
@@ -45,11 +45,12 @@ type LightningPoller struct {
 }
 
 type RunConfig struct {
-	Queries                  []QueryWithCallback `validate:"required"`
-	StartupPositionOverrides map[string]time.Time
-	Ticker                   *time.Ticker
-	PersistenceEnabled       bool   `json:"persistence_enabled"`
-	PersistencePath          string `json:"persistence_path"`
+	Queries                            []QueryWithCallback `validate:"required"`
+	StartupPositionOverrides           map[string]time.Time
+	Ticker                             *time.Ticker
+	PersistenceEnabled                 bool          `json:"persistence_enabled"`
+	PersistencePath                    string        `json:"persistence_path"`
+	LastModifiedDateCorrectionDuration time.Duration `json:"last_modified_date_correction_duration"`
 }
 
 type QueryWithCallback struct {
@@ -238,8 +239,7 @@ func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) error {
 // fast, then iterates over all results and compares with the saved IDs
 func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryWithCallback QueryWithCallback) (newRecordsJSON []byte, err error) {
 	newRecordsJSON = recordsJSON
-	resultLastModifiedDateString := getFinalLastModifiedDateStringFromJSON(recordsJSON)
-	resultLastModifiedDate, err := getTimestampFromResultLastModifiedDate(resultLastModifiedDateString)
+	resultLastModifiedDate, err := getFinalLastModifiedDateFromJSON(recordsJSON)
 	if err != nil {
 		errorutils.LogOnErr(nil, "error parsing LastModifiedDate", err)
 		return
@@ -253,16 +253,30 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 		correctedIterator := 0
 		for i := int64(0); i < length; i++ {
 			recordID := gjson.GetBytes(recordsJSON, fmt.Sprintf("%d.Id", i)).String()
-			if stringInSlice(recordID, lastPosition.PreviousRecordIDs) {
-				newRecordsJSON, err = sjson.DeleteBytes(newRecordsJSON, fmt.Sprintf("%d", correctedIterator))
-				if err != nil {
-					errorutils.LogOnErr(nil, "error removing record from json", err)
+			// check if the record ID is in the map of previously queried IDs.
+			// this prevents requeried record from being sent to the callback
+			// function every time after the poller has caught up.
+			if recordsPreviousLastModifiedDate, ok := lastPosition.PreviousRecordIDs[recordID]; ok {
+				// check if the last modified date is the same as before, then
+				// remove the record from the json if it is. if the
+				// LastModifiedDate does not match, then the record must have
+				// been updated again, so reprocess it.
+				currentRecordTimestamp, recordTimestampErr := getRecordsLastModifiedDate(correctedIterator, recordsJSON)
+				if recordTimestampErr != nil {
+					err = recordTimestampErr
 					return
 				}
-				// decrement corrected iterator when a record is removed
-				correctedIterator--
+				if recordsPreviousLastModifiedDate.Equal(currentRecordTimestamp) {
+					newRecordsJSON, err = sjson.DeleteBytes(newRecordsJSON, fmt.Sprintf("%d", correctedIterator))
+					if err != nil {
+						errorutils.LogOnErr(nil, "error removing record from json", err)
+						return
+					}
+					// decrement corrected iterator when a record is removed
+					correctedIterator--
+				}
 			}
-			// increment the correct iterator each time
+			// increment the corrected iterator each time
 			correctedIterator++
 		}
 		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
@@ -284,7 +298,7 @@ func (p *LightningPoller) handleSalesforceResponse(response pkg.SoqlResponse, re
 }
 
 func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, recordsJSON []byte) error {
-	newPosition, err := getPositionFromResult(response, recordsJSON)
+	newPosition, err := getPositionFromResult(response, recordsJSON, *p.positions[key])
 	if err != nil {
 		return err
 	}
@@ -300,39 +314,55 @@ func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, 
 	return nil
 }
 
-func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte) (position Position, err error) {
+func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte, previousPosition Position) (position Position, err error) {
 	// save last modified timestamp from last record in response
-	lastModifiedDate := getFinalLastModifiedDateStringFromJSON(recordsJSON)
-	if lastModifiedDate == "" {
-		logging.Log.WithFields(logrus.Fields{"json": string(recordsJSON)}).Debug("could not retrieve final last modified date from records json")
-		err = errors.New("could not retrieve final last modified date from records")
-		return
-	}
-	timestamp, timestampErr := getTimestampFromResultLastModifiedDate(lastModifiedDate)
+	timestamp, timestampErr := getFinalLastModifiedDateFromJSON(recordsJSON)
 	if timestampErr != nil {
 		err = timestampErr
 		return
 	}
 	position.LastModifiedDate = &timestamp
+
 	// save all of the record IDs of the response
-	lastQueriedIDs := []string{}
+	lastQueriedIDs := map[string]*time.Time{}
+
+	// if the last modified date is the same as the previous poll, then we will
+	// append the new IDs to the previous IDs. this prevents an infinite loop
+	// that occurs if the response from salesforce changes as a result of
+	// eventual consistency
+	if previousPosition.LastModifiedDate != nil && previousPosition.LastModifiedDate.Equal(timestamp) {
+		lastQueriedIDs = previousPosition.PreviousRecordIDs
+	}
+
 	gjsonIDresult := gjson.GetBytes(recordsJSON, "#.Id").Array()
-	for _, result := range gjsonIDresult {
-		lastQueriedIDs = append(lastQueriedIDs, result.String())
+	for i, result := range gjsonIDresult {
+		id := result.String()
+		recordTimestamp, recordTimestampErr := getRecordsLastModifiedDate(i, recordsJSON)
+		if recordTimestampErr != nil {
+			err = recordTimestampErr
+			return
+		}
+		lastQueriedIDs[id] = &recordTimestamp
 	}
 	position.PreviousRecordIDs = lastQueriedIDs
-	// save the next url
 	position.NextURL = response.NextRecordsUrl
 	return
 }
 
-func getFinalLastModifiedDateStringFromJSON(recordsJSON []byte) string {
+func getRecordsLastModifiedDate(recordPosition int, recordsJSON []byte) (lastModifiedDate time.Time, err error) {
+	path := fmt.Sprintf("%d.LastModifiedDate", recordPosition)
+	lastModifiedDateString := gjson.GetBytes(recordsJSON, path).String()
+	if lastModifiedDateString == "" {
+		logging.Log.WithFields(logrus.Fields{"json": string(recordsJSON)}).Debug("could not retrieve final last modified date from records json")
+		return lastModifiedDate, errors.New("could not retrieve final last modified date from records")
+	}
+	return getTimestampFromResultLastModifiedDate(lastModifiedDateString)
+}
+
+func getFinalLastModifiedDateFromJSON(recordsJSON []byte) (time.Time, error) {
 	numRecords := gjson.GetBytes(recordsJSON, "#").Int()
 	finalArrayIndex := numRecords - 1
-	path := fmt.Sprintf("%d.LastModifiedDate", finalArrayIndex)
-	finalLastModifiedDateResult := gjson.GetBytes(recordsJSON, path)
-	finalLastModifiedDateString := finalLastModifiedDateResult.String()
-	return finalLastModifiedDateString
+	return getRecordsLastModifiedDate(int(finalArrayIndex), recordsJSON)
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -360,6 +390,7 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	viper.AutomaticEnv() // read in environment variables that match
 	viper.SetDefault("grant_type", "password")
 	viper.SetDefault("poll_interval", "10s")
+	viper.SetDefault("last_modified_date_correction_duration", "5m")
 	viper.SetDefault("persistence_enabled", false)
 	viper.SetDefault("persistence_path", ".")
 	viper.SetDefault("api_version", "54.0")
@@ -370,11 +401,12 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	}
 	logging.Log.WithFields(logrus.Fields{"startupPositionOverrides": startupPositionOverrides}).Debug("startup position overrides")
 	config := &RunConfig{
-		Queries:                  queries,
-		Ticker:                   time.NewTicker(viper.GetDuration("poll_interval")),
-		PersistenceEnabled:       viper.GetBool("persistence_enabled"),
-		PersistencePath:          viper.GetString("persistence_path"),
-		StartupPositionOverrides: startupPositionOverrides,
+		Queries:                            queries,
+		Ticker:                             time.NewTicker(viper.GetDuration("poll_interval")),
+		PersistenceEnabled:                 viper.GetBool("persistence_enabled"),
+		PersistencePath:                    viper.GetString("persistence_path"),
+		StartupPositionOverrides:           startupPositionOverrides,
+		LastModifiedDateCorrectionDuration: viper.GetDuration("last_modified_date_correction_duration"),
 	}
 	theValidator := validator.New()
 	err = theValidator.Struct(config)
@@ -437,14 +469,23 @@ func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (str
 	if strings.Contains(strings.ToLower(builder.String()), operator) {
 		operator = "and"
 	}
-	// use of rfc3339 is important here. SOQL uses + to indicate a space, so it parses out timestamp with + in them as a space, which is an invalid timestamp
-	// and then it gets mad that the datetime isn't valid because it made it invalid by replacing the + (for the timezone) with a space.
-	// if the time is not zero, use time - 2 seconds to make sure we never catch mid second updates
-	//if position.LastModifiedDate.UTC() != zeroTime.UTC() {
-	//	correctedTime := position.LastModifiedDate.Add(-2 * time.Second)
-	//	position.LastModifiedDate = &correctedTime
-	//}
-	dateTimeString := getRfcFormattedUtcTimestampString(*currentPosition.LastModifiedDate)
+
+	// copy the value of the pointer, so that we don't override
+	lastModifiedDate := *currentPosition.LastModifiedDate
+	// if we have caught all the way up, then we remove 5 minutes from the last
+	// modified date to ensure that we don't miss any records that were were
+	// missed as a result of eventual consistency or mid second updates
+	now := time.Now()
+	correctedTime := now.Add(-p.config.LastModifiedDateCorrectionDuration)
+	if lastModifiedDate.After(correctedTime) {
+		lastModifiedDate = correctedTime
+	}
+
+	// use of rfc3339 is important here. SOQL uses + to indicate a space, so it
+	// parses out timestamp with + in them as a space, which is an invalid
+	// timestamp and then it gets mad that the datetime isn't valid because it
+	// made it invalid by replacing the + (for the timezone) with a space.
+	dateTimeString := getRfcFormattedUtcTimestampString(lastModifiedDate)
 	builder.WriteString(fmt.Sprintf(" %s LastModifiedDate >= %s order by LastModifiedDate, Id", operator, dateTimeString))
 	return builder.String(), nil
 }
@@ -572,13 +613,4 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 
 func getTimestampFromResultLastModifiedDate(lastModifiedDate string) (timestamp time.Time, err error) {
 	return time.Parse("2006-01-02T15:04:05.000+0000", lastModifiedDate)
-}
-
-func stringInSlice(str string, slice []string) bool {
-	for _, v := range slice {
-		if v == str {
-			return true
-		}
-	}
-	return false
 }
