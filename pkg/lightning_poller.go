@@ -324,7 +324,7 @@ func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte, previo
 	// append the new IDs to the previous IDs. this prevents an infinite loop
 	// that occurs if the response from salesforce changes as a result of
 	// eventual consistency
-	logging.Log.WithFields(logrus.Fields{"previous_last_modified_date": &previousPosition.LastModifiedDate, "new_position": timestamp}).Debug("comparing last modified dates")
+	logging.Log.WithFields(logrus.Fields{"previous_last_modified_date": *previousPosition.LastModifiedDate, "new_position": timestamp}).Debug("comparing last modified dates")
 	if previousPosition.LastModifiedDate != nil && previousPosition.LastModifiedDate.Equal(timestamp) {
 		logging.Log.WithFields(logrus.Fields{"previous_record_ids": previousPosition.PreviousRecordIDs}).Debug("last modified date is the same as previous poll, appending IDs")
 		lastQueriedIDs = previousPosition.PreviousRecordIDs
