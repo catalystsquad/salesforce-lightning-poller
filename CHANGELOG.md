@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.2.3...v1.3.0) (2023-03-28)
+
+
+### Features
+
+* refactor last queried records  ([#24](https://github.com/catalystsquad/salesforce-lightning-poller/issues/24)) ([70f680a](https://github.com/catalystsquad/salesforce-lightning-poller/commit/70f680ad31a1b7476cf435584839d903f7d1a739))
+
 ## [1.2.3](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.2.2...v1.2.3) (2023-03-27)
 
 
