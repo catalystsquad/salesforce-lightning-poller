@@ -267,6 +267,7 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 					return
 				}
 				if recordsPreviousLastModifiedDate.Equal(currentRecordTimestamp) {
+					logging.Log.WithFields(logrus.Fields{"record_id": recordID, "timestamp": currentRecordTimestamp}).Debug("removing record from json")
 					newRecordsJSON, err = sjson.DeleteBytes(newRecordsJSON, fmt.Sprintf("%d", correctedIterator))
 					if err != nil {
 						errorutils.LogOnErr(nil, "error removing record from json", err)
@@ -280,7 +281,11 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 			correctedIterator++
 		}
 		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
-		logging.Log.WithFields(logrus.Fields{"queried_records_total": length, "new_records_total": newRecordsLength}).Debug("removed already queried records")
+		logging.Log.WithFields(logrus.Fields{
+			"queried_records_total": length,
+			"new_records_total":     newRecordsLength,
+			"persistence_key":       queryWithCallback.PersistenceKey,
+		}).Debug("removed already queried records")
 		return
 	}
 	return
