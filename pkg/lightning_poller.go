@@ -249,12 +249,10 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 	if resultLastModifiedDate.Equal(*positionLastModifiedDate) {
 		// last modified dates are the same, check IDs and delete records that have matching IDs
 		length := gjson.GetBytes(recordsJSON, "#").Int()
-		logging.Log.WithFields(logrus.Fields{"previous_record_ids": lastPosition.PreviousRecordIDs}).Debug("last modified date is the same, checking IDs")
 		// iterator for tracking index after deletes in json occur
 		correctedIterator := 0
 		for i := int64(0); i < length; i++ {
 			recordID := gjson.GetBytes(recordsJSON, fmt.Sprintf("%d.Id", i)).String()
-			logging.Log.WithFields(logrus.Fields{"record_id": recordID}).Debug("checking record ID")
 			// check if the record ID is in the map of previously queried IDs.
 			// this prevents requeried record from being sent to the callback
 			// function every time after the poller has caught up.
@@ -268,9 +266,7 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 					err = recordTimestampErr
 					return
 				}
-				logging.Log.WithFields(logrus.Fields{"record_id": recordID, "timestamp": currentRecordTimestamp}).Debug("checking record timestamp")
 				if recordsPreviousLastModifiedDate.Equal(currentRecordTimestamp) {
-					logging.Log.WithFields(logrus.Fields{"record_id": recordID, "timestamp": currentRecordTimestamp}).Debug("removing record from json")
 					newRecordsJSON, err = sjson.DeleteBytes(newRecordsJSON, fmt.Sprintf("%d", correctedIterator))
 					if err != nil {
 						errorutils.LogOnErr(nil, "error removing record from json", err)
@@ -327,9 +323,7 @@ func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte, previo
 	// append the new IDs to the previous IDs. this prevents an infinite loop
 	// that occurs if the response from salesforce changes as a result of
 	// eventual consistency
-	logging.Log.WithFields(logrus.Fields{"previous_last_modified_date": *previousPosition.LastModifiedDate, "new_position": timestamp}).Debug("comparing last modified dates")
 	if previousPosition.LastModifiedDate != nil && previousPosition.LastModifiedDate.Equal(timestamp) {
-		logging.Log.WithFields(logrus.Fields{"previous_record_ids": previousPosition.PreviousRecordIDs}).Debug("last modified date is the same as previous poll, appending IDs")
 		lastQueriedIDs = previousPosition.PreviousRecordIDs
 	}
 
@@ -343,7 +337,6 @@ func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte, previo
 		}
 		lastQueriedIDs[id] = &recordTimestamp
 	}
-	logging.Log.WithFields(logrus.Fields{"last_queried_ids": lastQueriedIDs}).Debug("updated last queried IDs")
 	position.PreviousRecordIDs = lastQueriedIDs
 	position.NextURL = response.NextRecordsUrl
 	return
@@ -472,9 +465,10 @@ func (p *LightningPoller) getPollQuery(queryWithCallback QueryWithCallback) (str
 
 	// copy the value of the pointer, so that we don't override
 	lastModifiedDate := *currentPosition.LastModifiedDate
-	// if we have caught all the way up, then we remove 5 minutes from the last
-	// modified date to ensure that we don't miss any records that were were
-	// missed as a result of eventual consistency or mid second updates
+	// if we have caught all the way up, then we remove a configured amount of
+	// time from the last modified date to ensure that we don't miss any
+	// records that were passed as a result of eventual consistency or mid
+	// second updates
 	now := time.Now()
 	correctedTime := now.Add(-p.config.LastModifiedDateCorrectionDuration)
 	if lastModifiedDate.After(correctedTime) {
