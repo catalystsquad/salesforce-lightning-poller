@@ -254,6 +254,7 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 		correctedIterator := 0
 		for i := int64(0); i < length; i++ {
 			recordID := gjson.GetBytes(recordsJSON, fmt.Sprintf("%d.Id", i)).String()
+			logging.Log.WithFields(logrus.Fields{"record_id": recordID}).Debug("checking record ID")
 			// check if the record ID is in the map of previously queried IDs.
 			// this prevents requeried record from being sent to the callback
 			// function every time after the poller has caught up.
@@ -267,6 +268,7 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 					err = recordTimestampErr
 					return
 				}
+				logging.Log.WithFields(logrus.Fields{"record_id": recordID, "timestamp": currentRecordTimestamp}).Debug("checking record timestamp")
 				if recordsPreviousLastModifiedDate.Equal(currentRecordTimestamp) {
 					logging.Log.WithFields(logrus.Fields{"record_id": recordID, "timestamp": currentRecordTimestamp}).Debug("removing record from json")
 					newRecordsJSON, err = sjson.DeleteBytes(newRecordsJSON, fmt.Sprintf("%d", correctedIterator))
