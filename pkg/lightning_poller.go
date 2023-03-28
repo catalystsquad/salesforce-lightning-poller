@@ -263,7 +263,7 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 				// remove the record from the json if it is. if the
 				// LastModifiedDate does not match, then the record must have
 				// been updated again, so reprocess it.
-				currentRecordTimestamp, recordTimestampErr := getRecordsLastModifiedDate(correctedIterator, recordsJSON)
+				currentRecordTimestamp, recordTimestampErr := getRecordsLastModifiedDate(correctedIterator, newRecordsJSON)
 				if recordTimestampErr != nil {
 					err = recordTimestampErr
 					return
