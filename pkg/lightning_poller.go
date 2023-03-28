@@ -249,6 +249,7 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 	if resultLastModifiedDate.Equal(*positionLastModifiedDate) {
 		// last modified dates are the same, check IDs and delete records that have matching IDs
 		length := gjson.GetBytes(recordsJSON, "#").Int()
+		logging.Log.WithFields(logrus.Fields{"previous_record_ids": lastPosition.PreviousRecordIDs}).Debug("last modified date is the same, checking IDs")
 		// iterator for tracking index after deletes in json occur
 		correctedIterator := 0
 		for i := int64(0); i < length; i++ {
