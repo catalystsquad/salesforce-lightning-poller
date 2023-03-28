@@ -291,17 +291,6 @@ func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryW
 	return
 }
 
-func (p *LightningPoller) handleSalesforceResponse(response pkg.SoqlResponse, recordsJSON []byte, queryWithCallback QueryWithCallback) {
-	var err error
-	savePosition := queryWithCallback.Callback(recordsJSON, err)
-	if savePosition {
-		positionErr := p.updatePosition(queryWithCallback.PersistenceKey, response, recordsJSON)
-		if positionErr != nil {
-			errorutils.LogOnErr(nil, "error updating position", positionErr)
-		}
-	}
-}
-
 func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, recordsJSON []byte) error {
 	newPosition, err := getPositionFromResult(response, recordsJSON, *p.positions[key])
 	if err != nil {
@@ -568,7 +557,15 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 				errorutils.LogOnErr(nil, "error marshaling soql query response", err)
 				return false, err
 			}
-			p.handleSalesforceResponse(nextURLResponse, recordsJSON, queryWithCallback)
+			var callbackErr error
+			savePosition := queryWithCallback.Callback(recordsJSON, callbackErr)
+			if savePosition {
+				positionErr := p.updatePosition(queryWithCallback.PersistenceKey, nextURLResponse, recordsJSON)
+				if positionErr != nil {
+					errorutils.LogOnErr(nil, "error updating position", positionErr)
+					return false, positionErr
+				}
+			}
 			p.setUpToDateQuery(nextURLResponse.Done, queryWithCallback)
 			return true, nil
 		} else {
@@ -609,7 +606,17 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 		}
 		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
 		if newRecordsLength > 0 {
-			p.handleSalesforceResponse(queryResponse, newRecordsJSON, queryWithCallback)
+			var callbackErr error
+			savePosition := queryWithCallback.Callback(newRecordsJSON, callbackErr)
+			if savePosition {
+				// pass the original recordsJSON so that we save IDs of all of
+				// the records in the response
+				positionErr := p.updatePosition(queryWithCallback.PersistenceKey, queryResponse, recordsJSON)
+				if positionErr != nil {
+					errorutils.LogOnErr(nil, "error updating position", positionErr)
+					return false, positionErr
+				}
+			}
 			p.setUpToDateQuery(queryResponse.Done, queryWithCallback)
 			return true, nil
 		}
