@@ -336,6 +336,7 @@ func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte, previo
 	// that occurs if the response from salesforce changes as a result of
 	// eventual consistency
 	if previousPosition.LastModifiedDate != nil && previousPosition.LastModifiedDate.Equal(timestamp) {
+		logging.Log.WithFields(logrus.Fields{"previous_record_ids": previousPosition.PreviousRecordIDs}).Debug("last modified date is the same as previous poll, appending IDs")
 		lastQueriedIDs = previousPosition.PreviousRecordIDs
 	}
 
