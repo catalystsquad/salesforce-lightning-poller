@@ -340,6 +340,7 @@ func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte, previo
 		}
 		lastQueriedIDs[id] = &recordTimestamp
 	}
+	logging.Log.WithFields(logrus.Fields{"last_queried_ids": lastQueriedIDs}).Debug("updated last queried IDs")
 	position.PreviousRecordIDs = lastQueriedIDs
 	position.NextURL = response.NextRecordsUrl
 	return
