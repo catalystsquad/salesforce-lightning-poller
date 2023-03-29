@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.0...v1.3.1) (2023-03-29)
+
+
+### Bug Fixes
+
+* always remove matching previously polled records ([#25](https://github.com/catalystsquad/salesforce-lightning-poller/issues/25)) ([680d295](https://github.com/catalystsquad/salesforce-lightning-poller/commit/680d29567416d6c34b51f122a876c399fecc86dd))
+
 # [1.3.0](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.2.3...v1.3.0) (2023-03-28)
 
 
