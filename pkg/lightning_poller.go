@@ -235,58 +235,49 @@ func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) error {
 }
 
 // removeAlreadyQueriedRecords checks a result for records that were already
-// queried in the previous poll(). compares lastModifiedDate first to fail
-// fast, then iterates over all results and compares with the saved IDs
+// queried in the previous poll(). iterates over all results and compares with
+// the saved IDs
 func (p *LightningPoller) removeAlreadyQueriedRecords(recordsJSON []byte, queryWithCallback QueryWithCallback) (newRecordsJSON []byte, err error) {
 	newRecordsJSON = recordsJSON
-	resultLastModifiedDate, err := getFinalLastModifiedDateFromJSON(recordsJSON)
-	if err != nil {
-		errorutils.LogOnErr(nil, "error parsing LastModifiedDate", err)
-		return
-	}
 	lastPosition := p.positions[queryWithCallback.PersistenceKey]
-	positionLastModifiedDate := lastPosition.LastModifiedDate
-	if resultLastModifiedDate.Equal(*positionLastModifiedDate) {
-		// last modified dates are the same, check IDs and delete records that have matching IDs
-		length := gjson.GetBytes(recordsJSON, "#").Int()
-		// iterator for tracking index after deletes in json occur
-		correctedIterator := 0
-		for i := int64(0); i < length; i++ {
-			recordID := gjson.GetBytes(recordsJSON, fmt.Sprintf("%d.Id", i)).String()
-			// check if the record ID is in the map of previously queried IDs.
-			// this prevents requeried record from being sent to the callback
-			// function every time after the poller has caught up.
-			if recordsPreviousLastModifiedDate, ok := lastPosition.PreviousRecordIDs[recordID]; ok {
-				// check if the last modified date is the same as before, then
-				// remove the record from the json if it is. if the
-				// LastModifiedDate does not match, then the record must have
-				// been updated again, so reprocess it.
-				currentRecordTimestamp, recordTimestampErr := getRecordsLastModifiedDate(correctedIterator, newRecordsJSON)
-				if recordTimestampErr != nil {
-					err = recordTimestampErr
+	// last modified dates are the same, check IDs and delete records that have matching IDs
+	length := gjson.GetBytes(recordsJSON, "#").Int()
+	// iterator for tracking index after deletes in json occur
+	correctedIterator := 0
+	for i := int64(0); i < length; i++ {
+		recordID := gjson.GetBytes(recordsJSON, fmt.Sprintf("%d.Id", i)).String()
+		// check if the record ID is in the map of previously queried IDs.
+		// this prevents requeried record from being sent to the callback
+		// function every time after the poller has caught up.
+		if recordsPreviousLastModifiedDate, ok := lastPosition.PreviousRecordIDs[recordID]; ok {
+			// check if the last modified date is the same as before, then
+			// remove the record from the json if it is. if the
+			// LastModifiedDate does not match, then the record must have
+			// been updated again, so reprocess it.
+			currentRecordTimestamp, recordTimestampErr := getRecordsLastModifiedDate(correctedIterator, newRecordsJSON)
+			if recordTimestampErr != nil {
+				err = recordTimestampErr
+				return
+			}
+			if recordsPreviousLastModifiedDate.Equal(currentRecordTimestamp) {
+				newRecordsJSON, err = sjson.DeleteBytes(newRecordsJSON, fmt.Sprintf("%d", correctedIterator))
+				if err != nil {
+					errorutils.LogOnErr(nil, "error removing record from json", err)
 					return
 				}
-				if recordsPreviousLastModifiedDate.Equal(currentRecordTimestamp) {
-					newRecordsJSON, err = sjson.DeleteBytes(newRecordsJSON, fmt.Sprintf("%d", correctedIterator))
-					if err != nil {
-						errorutils.LogOnErr(nil, "error removing record from json", err)
-						return
-					}
-					// decrement corrected iterator when a record is removed
-					correctedIterator--
-				}
+				// decrement corrected iterator when a record is removed
+				correctedIterator--
 			}
-			// increment the corrected iterator each time
-			correctedIterator++
 		}
-		newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
-		logging.Log.WithFields(logrus.Fields{
-			"queried_records_total": length,
-			"new_records_total":     newRecordsLength,
-			"persistence_key":       queryWithCallback.PersistenceKey,
-		}).Debug("removed already queried records")
-		return
+		// increment the corrected iterator each time
+		correctedIterator++
 	}
+	newRecordsLength := gjson.GetBytes(newRecordsJSON, "#").Int()
+	logging.Log.WithFields(logrus.Fields{
+		"queried_records_total": length,
+		"new_records_total":     newRecordsLength,
+		"persistence_key":       queryWithCallback.PersistenceKey,
+	}).Debug("removed already queried records")
 	return
 }
 
