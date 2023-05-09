@@ -298,6 +298,12 @@ func (p *LightningPoller) updatePosition(key string, response pkg.SoqlResponse, 
 	return nil
 }
 
+// saveNextRecordsURL saves the nextRecordsURL from a response to the current
+// position without overriding the last queried records
+func (p *LightningPoller) saveNextRecordsURL(url string, queryWithCallback QueryWithCallback) {
+	p.positions[queryWithCallback.PersistenceKey].NextURL = url
+}
+
 func getPositionFromResult(response pkg.SoqlResponse, recordsJSON []byte, previousPosition Position) (position Position, err error) {
 	// save last modified timestamp from last record in response
 	timestamp, timestampErr := getFinalLastModifiedDateFromJSON(recordsJSON)
@@ -606,6 +612,13 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 					return false, positionErr
 				}
 			}
+			p.setUpToDateQuery(queryResponse.Done, queryWithCallback)
+			return true, nil
+		} else if !queryResponse.Done {
+			// if we didn't get any new records, but the query is not done,
+			// then we need to save the NextRecordsUrl so that we can query
+			// the next batch of records
+			p.saveNextRecordsURL(queryResponse.NextRecordsUrl, queryWithCallback)
 			p.setUpToDateQuery(queryResponse.Done, queryWithCallback)
 			return true, nil
 		}
