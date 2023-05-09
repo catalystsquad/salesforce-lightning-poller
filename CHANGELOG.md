@@ -1,3 +1,10 @@
+## [1.3.2](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.1...v1.3.2) (2023-05-09)
+
+
+### Bug Fixes
+
+* save nextUrl when soqlResponse is not done ([#27](https://github.com/catalystsquad/salesforce-lightning-poller/issues/27)) ([57744ac](https://github.com/catalystsquad/salesforce-lightning-poller/commit/57744acaaf7f4ea10d9874b080eae92c9a3ff5e9))
+
 ## [1.3.1](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.0...v1.3.1) (2023-03-29)
 
 
