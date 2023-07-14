@@ -1,3 +1,10 @@
+## [1.3.3](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.2...v1.3.3) (2023-07-14)
+
+
+### Bug Fixes
+
+* handle invalid query locator error ([#28](https://github.com/catalystsquad/salesforce-lightning-poller/issues/28)) ([ad5b031](https://github.com/catalystsquad/salesforce-lightning-poller/commit/ad5b031c86905458837bf4fe85b33c1449957089))
+
 ## [1.3.2](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.1...v1.3.2) (2023-05-09)
 
 
