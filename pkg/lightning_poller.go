@@ -536,12 +536,20 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 	// attempt to query with the NextRecordsUrl first
 	nextRecordsURL := p.getNextRecordsURL(queryWithCallback)
 	if nextRecordsURL != "" {
+		logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("using next records url")
 		nextURLResponse, err := p.SfUtils.GetNextRecords(nextRecordsURL)
 		if err != nil {
 			// check if the NextRecordsUrl was not valid, return and
 			// log if it was some other error
 			// TODO could check the error better than this
-			if !strings.Contains(err.Error(), "INVALID_QUERY_LOCATOR") {
+			if strings.Contains(err.Error(), "INVALID_QUERY_LOCATOR") {
+				logging.Log.WithFields(logrus.Fields{
+					"persistence_key": queryWithCallback.PersistenceKey,
+				}).WithError(err).Debug("invalid query locator, resetting next records url")
+				// if the query authenticator is invalid, then reset the next records url
+				p.saveNextRecordsURL("", queryWithCallback)
+				return true, nil
+			} else {
 				errorutils.LogOnErr(nil, "error getting next records", err)
 				return false, err
 			}
@@ -589,6 +597,11 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 		return false, err
 	}
 
+	logging.Log.WithFields(logrus.Fields{
+		"persistence_key": queryWithCallback.PersistenceKey,
+		"record_count":    len(queryResponse.Records),
+		"done":            queryResponse.Done,
+	}).Debug("got query response")
 	if len(queryResponse.Records) > 0 {
 		recordsJSON, err := json.Marshal(queryResponse.Records)
 		if err != nil {
