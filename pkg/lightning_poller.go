@@ -589,6 +589,7 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 		return false, err
 	}
 
+	logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey, "record_count": len(queryResponse.Records)}).Debug("got query response")
 	if len(queryResponse.Records) > 0 {
 		recordsJSON, err := json.Marshal(queryResponse.Records)
 		if err != nil {
