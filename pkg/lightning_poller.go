@@ -536,7 +536,7 @@ func (p *LightningPoller) doQuery(queryWithCallback QueryWithCallback) (bool, er
 	// attempt to query with the NextRecordsUrl first
 	nextRecordsURL := p.getNextRecordsURL(queryWithCallback)
 	if nextRecordsURL != "" {
-		logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Info("using next records url")
+		logging.Log.WithFields(logrus.Fields{"persistence_key": queryWithCallback.PersistenceKey}).Debug("using next records url")
 		nextURLResponse, err := p.SfUtils.GetNextRecords(nextRecordsURL)
 		if err != nil {
 			// check if the NextRecordsUrl was not valid, return and
