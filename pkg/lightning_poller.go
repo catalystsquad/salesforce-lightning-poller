@@ -96,12 +96,16 @@ func (p *LightningPoller) initMaps(queries []QueryWithCallback) {
 // validateDependsOn iterates over all dependsOn fields and ensures that they
 // reference a real persistenceKey by checking the keys of the inProgressQueries
 func (p *LightningPoller) validateDependsOn() error {
+	missingDependencies := []string{}
 	for _, query := range p.config.Queries {
 		for _, dependency := range query.DependsOn {
 			if _, ok := p.inProgressQueries[dependency]; !ok {
-				return errors.New("dependsOn field includes a persistenceKey that does not exist")
+				missingDependencies = append(missingDependencies, dependency)
 			}
 		}
+	}
+	if len(missingDependencies) > 0 {
+		return errors.New(fmt.Sprintf("dependsOn field includes persistenceKeys that don't exist. Missing persistenceKeys: %s", strings.Join(missingDependencies, ",")))
 	}
 	return nil
 }
