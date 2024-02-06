@@ -1,3 +1,10 @@
+## [1.3.4](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.3...v1.3.4) (2024-02-06)
+
+
+### Bug Fixes
+
+* Add list of missing dependencies to the error when dependencies are missing ([#32](https://github.com/catalystsquad/salesforce-lightning-poller/issues/32)) ([ba7d27a](https://github.com/catalystsquad/salesforce-lightning-poller/commit/ba7d27adb7dbed4580655d83de31710d129dd01d))
+
 ## [1.3.3](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.2...v1.3.3) (2023-07-14)
 
 
