@@ -389,6 +389,7 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	viper.SetDefault("poll_interval", "10s")
 	viper.SetDefault("last_modified_date_correction_duration", "5m")
 	viper.SetDefault("persistence_enabled", false)
+	viper.SetDefault("skip_dependency_check", false)
 	viper.SetDefault("persistence_path", ".")
 	viper.SetDefault("api_version", "54.0")
 	viper.SetDefault("startup_position_overrides", "")
@@ -404,6 +405,7 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		PersistencePath:                    viper.GetString("persistence_path"),
 		StartupPositionOverrides:           startupPositionOverrides,
 		LastModifiedDateCorrectionDuration: viper.GetDuration("last_modified_date_correction_duration"),
+		SkipDependencyCheck:                viper.GetBool("skip_dependency_check"),
 	}
 	theValidator := validator.New()
 	err = theValidator.Struct(config)
