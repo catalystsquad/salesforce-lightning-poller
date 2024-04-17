@@ -51,6 +51,7 @@ type RunConfig struct {
 	PersistenceEnabled                 bool          `json:"persistence_enabled"`
 	PersistencePath                    string        `json:"persistence_path"`
 	LastModifiedDateCorrectionDuration time.Duration `json:"last_modified_date_correction_duration"`
+	SkipDependencyCheck                bool          `json:"skip_dependency_check"`
 }
 
 type QueryWithCallback struct {
@@ -73,9 +74,11 @@ func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config) (*Ligh
 		return nil, err
 	}
 	poller.config = config
-	err = poller.validateDependsOn()
-	if err != nil {
-		return nil, err
+	if !config.SkipDependencyCheck {
+		err = poller.validateDependsOn()
+		if err != nil {
+			return nil, err
+		}
 	}
 	poller.SfUtils, err = pkg.NewSalesforceUtils(true, sfConfig)
 	if err != nil {
@@ -225,8 +228,8 @@ func (p *LightningPoller) runQuery(queryWithCallback QueryWithCallback) error {
 	var err error
 	shouldQuery := true
 	for shouldQuery {
-		// check in the middle of the loop in case the dependencies change
-		if !p.dependenciesUpToDate(queryWithCallback) {
+		// if we're not supposed to skip the dependency check, check in the middle of the loop in case the dependencies change
+		if !p.config.SkipDependencyCheck && !p.dependenciesUpToDate(queryWithCallback) {
 			logging.Log.WithFields(logrus.Fields{"reason": "dependencies are not up to date", "persistence_key": queryWithCallback.PersistenceKey}).Info("skipping poll")
 			return nil
 		}
