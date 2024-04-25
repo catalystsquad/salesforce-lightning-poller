@@ -1,3 +1,10 @@
+## [1.3.5](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.4...v1.3.5) (2024-04-25)
+
+
+### Bug Fixes
+
+* Optional dependencies ([#34](https://github.com/catalystsquad/salesforce-lightning-poller/issues/34)) ([92d8f39](https://github.com/catalystsquad/salesforce-lightning-poller/commit/92d8f390623196de78c994d9fc041d937c028024))
+
 ## [1.3.4](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.3...v1.3.4) (2024-02-06)
 
 
