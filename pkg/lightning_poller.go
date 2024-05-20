@@ -61,7 +61,7 @@ type QueryWithCallback struct {
 	DependsOn      []string
 }
 
-func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config, ignoreHistory bool) (*LightningPoller, error) {
+func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config, startFrom *time.Time) (*LightningPoller, error) {
 	poller := &LightningPoller{
 		inProgressQueries:   make(map[string]bool),
 		inProgressQueriesMu: &sync.Mutex{},
@@ -69,7 +69,7 @@ func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config, ignore
 		upToDateQueriesMu:   &sync.Mutex{},
 	}
 	poller.initMaps(queries)
-	config, err := initConfig(queries, ignoreHistory)
+	config, err := initConfig(queries, startFrom)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +363,7 @@ func getFinalLastModifiedDateFromJSON(recordsJSON []byte) (time.Time, error) {
 }
 
 // initConfig reads in config file and ENV variables if set.
-func initConfig(queries []QueryWithCallback, ignoreHistory bool) (*RunConfig, error) {
+func initConfig(queries []QueryWithCallback, startFrom *time.Time) (*RunConfig, error) {
 	var cfgFile string
 	if cfgFile != "" {
 		// Use config file from the flag.
@@ -395,8 +395,8 @@ func initConfig(queries []QueryWithCallback, ignoreHistory bool) (*RunConfig, er
 	viper.SetDefault("api_version", "54.0")
 	viper.SetDefault("startup_position_overrides", "")
 	var startupPositionOverrides map[string]time.Time
-	if ignoreHistory {
-		startupPositionOverrides = getStartupPositionOverridesIgnoringHistory(queries)
+	if startFrom != nil {
+		startupPositionOverrides = getStartupPositionOverridesFromTimeIgnoringHistory(queries, *startFrom)
 	} else {
 		startupPositionOverrides, err = stringToTimeMap(viper.GetString("startup_position_overrides"))
 		if err != nil {
@@ -425,7 +425,7 @@ func initConfig(queries []QueryWithCallback, ignoreHistory bool) (*RunConfig, er
 	return config, nil
 }
 
-func getStartupPositionOverridesIgnoringHistory(queries []QueryWithCallback) map[string]time.Time {
+func getStartupPositionOverridesFromTimeIgnoringHistory(queries []QueryWithCallback, startFrom time.Time) map[string]time.Time {
 	overrides := make(map[string]time.Time)
 	start := time.Now()
 	for _, query := range queries {
