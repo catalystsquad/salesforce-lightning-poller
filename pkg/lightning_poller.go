@@ -427,9 +427,8 @@ func initConfig(queries []QueryWithCallback, startFrom *time.Time) (*RunConfig, 
 
 func getStartupPositionOverridesFromTimeIgnoringHistory(queries []QueryWithCallback, startFrom time.Time) map[string]time.Time {
 	overrides := make(map[string]time.Time)
-	start := time.Now()
 	for _, query := range queries {
-		overrides[query.PersistenceKey] = start
+		overrides[query.PersistenceKey] = startFrom
 	}
 	return overrides
 }
