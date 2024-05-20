@@ -61,7 +61,7 @@ type QueryWithCallback struct {
 	DependsOn      []string
 }
 
-func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config) (*LightningPoller, error) {
+func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config, ignoreHistory bool) (*LightningPoller, error) {
 	poller := &LightningPoller{
 		inProgressQueries:   make(map[string]bool),
 		inProgressQueriesMu: &sync.Mutex{},
@@ -69,7 +69,7 @@ func NewLightningPoller(queries []QueryWithCallback, sfConfig pkg.Config) (*Ligh
 		upToDateQueriesMu:   &sync.Mutex{},
 	}
 	poller.initMaps(queries)
-	config, err := initConfig(queries)
+	config, err := initConfig(queries, ignoreHistory)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +363,7 @@ func getFinalLastModifiedDateFromJSON(recordsJSON []byte) (time.Time, error) {
 }
 
 // initConfig reads in config file and ENV variables if set.
-func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
+func initConfig(queries []QueryWithCallback, ignoreHistory bool) (*RunConfig, error) {
 	var cfgFile string
 	if cfgFile != "" {
 		// Use config file from the flag.
@@ -379,7 +379,8 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		viper.SetConfigName(".salesforce-lightning-poller")
 	}
 	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
+	err := viper.ReadInConfig()
+	if err == nil {
 		logging.Log.WithField("file", viper.ConfigFileUsed()).Info("Using config file")
 	}
 	// setup env vars
@@ -393,9 +394,14 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 	viper.SetDefault("persistence_path", ".")
 	viper.SetDefault("api_version", "54.0")
 	viper.SetDefault("startup_position_overrides", "")
-	startupPositionOverrides, err := stringToTimeMap(viper.GetString("startup_position_overrides"))
-	if err != nil {
-		return nil, errorx.Decorate(err, "error initializing config, unable to parse startup_position_override")
+	var startupPositionOverrides map[string]time.Time
+	if ignoreHistory {
+		startupPositionOverrides = getStartupPositionOverridesIgnoringHistory(queries)
+	} else {
+		startupPositionOverrides, err = stringToTimeMap(viper.GetString("startup_position_overrides"))
+		if err != nil {
+			return nil, errorx.Decorate(err, "error initializing config, unable to parse startup_position_override")
+		}
 	}
 	logging.Log.WithFields(logrus.Fields{"startupPositionOverrides": startupPositionOverrides}).Debug("startup position overrides")
 	config := &RunConfig{
@@ -417,6 +423,15 @@ func initConfig(queries []QueryWithCallback) (*RunConfig, error) {
 		return nil, errorx.DecorateMany("error initializing config", errs...)
 	}
 	return config, nil
+}
+
+func getStartupPositionOverridesIgnoringHistory(queries []QueryWithCallback) map[string]time.Time {
+	overrides := make(map[string]time.Time)
+	start := time.Now()
+	for _, query := range queries {
+		overrides[query.PersistenceKey] = start
+	}
+	return overrides
 }
 
 func stringToTimeMap(i string) (o map[string]time.Time, err error) {
