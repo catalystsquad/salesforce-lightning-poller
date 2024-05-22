@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.5...v1.4.0) (2024-05-22)
+
+
+### Features
+
+* Support syncing all objects from a given point in time forward ([#35](https://github.com/catalystsquad/salesforce-lightning-poller/issues/35)) ([d7b0d89](https://github.com/catalystsquad/salesforce-lightning-poller/commit/d7b0d89893522f836912963b3f92d4d2066bcdb4))
+
 ## [1.3.5](https://github.com/catalystsquad/salesforce-lightning-poller/compare/v1.3.4...v1.3.5) (2024-04-25)
 
 
