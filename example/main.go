@@ -21,7 +21,7 @@ func main() {
 			},
 		},
 	}
-	poller, err := pkg.NewLightningPoller(queries, pkg2.Config{})
+	poller, err := pkg.NewLightningPoller(queries, pkg2.Config{}, nil, nil)
 	errorutils.PanicOnErr(nil, "error creating poller", err)
 	poller.Run()
 }
